@@ -1,0 +1,13 @@
+# Dépendances Node.js (React)
+node_modules/
+
+# Environnement Python et caches
+__pycache__/
+*.pyc
+venv/
+env/
+.env
+
+# Fichiers OS
+.DS_Store
+Thumbs.db
