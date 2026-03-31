@@ -4,7 +4,7 @@ import GlassCard from '../components/GlassCard';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, Area, AreaChart
 } from 'recharts';
-import { Activity, Server, Users, RefreshCw, PlugZap, Clock, Target, Database, Shield } from 'lucide-react';
+import { Activity, Server, Users, RefreshCw, PlugZap, Clock, Target, Database, Shield, Calendar } from 'lucide-react';
 
 const KPI_OPTIONS = [
   { key: 'CPU',      label: 'Charge CPU',       unit: '%', color: '#0ea5e9', Icon: Activity },
@@ -59,8 +59,12 @@ export default function DashboardPage() {
   const [selected, setSelected] = useState([]);
   const [kpi, setKpi]           = useState('CPU');
   const [status, setStatus]     = useState(null);
+  const [nodes, setNodes]       = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError]       = useState('');
+  
+  // NOUVEAU : Le state pour le filtre de temps
+  const [timeFilter, setTimeFilter] = useState('24h');
   
   const historyRef = useRef(
     (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { return []; } })()
@@ -86,14 +90,19 @@ export default function DashboardPage() {
         const base = bases.find(b => b.ID === id);
         if (!base) continue;
         try {
-          const { data } = await api.get(`/api/metrics/${id}`);
+          // MODIFICATION : Envoi du filtre de temps à l'API FastAPI
+          const { data } = await api.get(`/api/metrics/${id}?range=${timeFilter}`);
+          
+          if (id === ids[0]) setNodes(data.nodes || []);
           const cpu  = data.cpu?.busy_pct ?? 0;
           const ram  = data.ram?.ram_pct  ?? 0;
           const sess = (data.sessions?.ACTIVE ?? 0) + (data.sessions?.INACTIVE ?? 0);
 
           const alreadyLoaded = historyRef.current.some(h => h.Nom_Base === base.Instance);
           if (!alreadyLoaded) {
-            for (let i = 24; i > 0; i--) {
+            // Astuce : On génère plus de points fictifs si on est sur un filtre long pour la démo
+            const pointsToGenerate = timeFilter === '24h' ? 24 : 72; 
+            for (let i = pointsToGenerate; i > 0; i--) {
               const t = new Date(now - i * 3600 * 1000).toISOString();
               historyRef.current.push({
                 Heure: t, Nom_Base: base.Instance,
@@ -107,16 +116,25 @@ export default function DashboardPage() {
         } catch { /* skip */ }
       }
 
-      const cutoff = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+      // MODIFICATION : Calcul dynamique de la limite de temps pour le nettoyage
+      let hours = 24;
+      if (timeFilter === '7d') hours = 24 * 7;
+      else if (timeFilter === '14d') hours = 24 * 14;
+      else if (timeFilter === '1m') hours = 24 * 30;
+      else if (timeFilter === '3m') hours = 24 * 90;
+
+      const cutoff = new Date(Date.now() - hours * 3600 * 1000).toISOString();
       historyRef.current = historyRef.current.filter(h => h.Heure >= cutoff);
+      
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(historyRef.current)); } catch { /* ignore */ }
       setHistoryDisplay([...historyRef.current]);
     } catch { setError('Erreur réseau lors de la collecte.'); }
     finally { setRefreshing(false); }
   };
 
+  // MODIFICATION : On relance la collecte si la base sélectionnée OU le filtre de temps change
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (bases.length && selected.length) collect(selected); }, [bases]);
+  useEffect(() => { if (bases.length && selected.length) collect(selected); }, [bases, timeFilter]);
 
   const selectedNames = selected.map(id => bases.find(b => b.ID === id)?.Instance).filter(Boolean);
   const filteredHistory = historyDisplay.filter(h => selectedNames.includes(h.Nom_Base));
@@ -126,7 +144,8 @@ export default function DashboardPage() {
     if (!byTime[h.Heure]) byTime[h.Heure] = { Heure: h.Heure };
     byTime[h.Heure][h.Nom_Base] = h[kpi];
   });
-  const chartData = Object.values(byTime).sort((a,b) => a.Heure.localeCompare(b.Heure)).slice(-48);
+  // On récupère plus de points pour les graphiques longs
+  const chartData = Object.values(byTime).sort((a,b) => a.Heure.localeCompare(b.Heure)).slice(-150);
 
   const COLORS = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ec4899'];
   const currentKpi = KPI_OPTIONS.find(k => k.key === kpi);
@@ -157,9 +176,9 @@ export default function DashboardPage() {
     <div>
       <div className="page-header">
         <div className="page-header-icon"><Activity size={28} /></div>
-        <div>
+        <div style={{ flex: 1 }}>
           <h1 className="page-title text-gradient">Centre Opérationnel</h1>
-          <p className="page-subtitle">Supervision des performances Oracle en temps réel</p>
+          <p className="page-subtitle">Supervision des performances SGBD (Oracle & MySQL) en temps réel</p>
         </div>
       </div>
 
@@ -169,10 +188,17 @@ export default function DashboardPage() {
         <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 250 }}>
             <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Database size={14} /> Cibler les instances</label>
-            <select multiple value={selected.map(String)}
+            <select 
+              multiple 
+              value={selected.map(String)}
+              size={Math.max(2, bases.length)}
               onChange={e => setSelected(Array.from(e.target.selectedOptions, o => parseInt(o.value)))}
-              style={{ height: 50, overflow: 'hidden', borderRadius: 12 }}>
-              {bases.map(b => <option key={b.ID} value={b.ID} style={{ padding: '8px 12px' }}>{b.Instance} — {b.IP}</option>)}
+              style={{ width: '100%', borderRadius: 12, padding: '4px', background: 'rgba(15, 23, 42, 0.6)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', outline: 'none' }}>
+              {bases.map(b => (
+                <option key={b.ID} value={b.ID} style={{ padding: '10px 15px', borderRadius: 8, margin: '2px 0', cursor: 'pointer' }}>
+                  {b.Instance} — {b.IP} ({b.Type})
+                </option>
+              ))}
             </select>
           </div>
           <button className="btn btn-primary" style={{ height: 50, padding: '0 32px' }} disabled={refreshing || !selected.length} onClick={() => collect(selected)}>
@@ -188,7 +214,7 @@ export default function DashboardPage() {
           const isActive = kpi === k.key;
           return (
             <GlassCard key={k.key} accent={k.color} glow={isActive} onClick={() => setKpi(k.key)}
-              style={{ padding: '20px', border: isActive ? `1px solid ${k.color}50` : undefined }}>
+              style={{ padding: '20px', border: isActive ? `1px solid ${k.color}50` : undefined, cursor: 'pointer' }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
                 <div>
                   <div style={{ color: '#94a3b8', fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>
@@ -215,7 +241,23 @@ export default function DashboardPage() {
             <currentKpi.Icon size={20} color={currentKpi.color} />
             <h2 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>Évolution — {currentKpi.label}</h2>
           </div>
-          <span className="badge badge-blue">Dernières 24 Heures</span>
+          
+          {/* MODIFICATION : Le filtre de temps stylisé */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(15, 23, 42, 0.6)', padding: '6px 14px', borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)' }}>
+            <Calendar size={14} color="#94a3b8" />
+            <select 
+              value={timeFilter}
+              onChange={(e) => setTimeFilter(e.target.value)}
+              style={{ background: 'transparent', color: '#e2e8f0', border: 'none', outline: 'none', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', appearance: 'none', paddingRight: '10px' }}
+            >
+              <option value="24h" style={{ background: '#0f172a' }}>Dernières 24h</option>
+              <option value="7d" style={{ background: '#0f172a' }}>1 Semaine</option>
+              <option value="14d" style={{ background: '#0f172a' }}>2 Semaines</option>
+              <option value="1m" style={{ background: '#0f172a' }}>1 Mois</option>
+              <option value="3m" style={{ background: '#0f172a' }}>3 Mois</option>
+            </select>
+          </div>
+
         </div>
         
         {chartData.length === 0 ? (
@@ -249,6 +291,39 @@ export default function DashboardPage() {
           </ResponsiveContainer>
         )}
       </GlassCard>
+
+      {nodes.length > 0 && (
+        <GlassCard style={{ padding: '32px 24px', marginBottom: 32 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 24 }}>
+            <Server size={20} color="#10b981" />
+            <h2 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>État des Nœuds</h2>
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: '0 8px' }}>
+              <thead>
+                <tr>
+                  {Object.keys(nodes[0]).map(key => (
+                    <th key={key} style={{ padding: '12px 16px', textAlign: 'left', color: '#94a3b8', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                      {key.replace('_', ' ')}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {nodes.map((node, i) => (
+                  <tr key={i} className="table-row-hover" style={{ background: 'rgba(255,255,255,0.03)', transition: 'transform 0.2s' }}>
+                    {Object.values(node).map((val, j) => (
+                      <td key={j} style={{ padding: '16px', fontSize: '0.85rem', color: val === 'OPEN' || val === 'ACTIVE' || val === 'READ WRITE' ? '#10b981' : '#e2e8f0', fontWeight: val === 'OPEN' || val === 'ACTIVE' ? 700 : 400, borderTop: '1px solid rgba(255,255,255,0.05)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                        {String(val)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </GlassCard>
+      )}
     </div>
   );
 }

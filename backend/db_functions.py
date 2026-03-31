@@ -115,10 +115,9 @@ def ajouter_base_cible(nom, ip, port, user, mdp, type_sgbd):
     conn = get_oracle_connection()
     try:
         cursor = conn.cursor()
-        # On cherche l'ID du type par son nom (insensible à la casse)
         cursor.execute("SELECT ID_TYPE_BASE FROM TYPE_BASE_CIBLE WHERE UPPER(NOM_TYPE) = UPPER(:t)", t=type_sgbd)
         row = cursor.fetchone()
-        id_type = row[0] if row else 1 # Défaut à 1 si non trouvé
+        id_type = row[0] if row else 1
 
         sql = "INSERT INTO BASE_CIBLE (NOM_INSTANCE, ADRESSE_IP, PORT, UTILISATEUR_CIBLE, MOT_DE_PASSE_CIBLE, ID_TYPE_BASE) VALUES (:n, :ip, :p, :u, :m, :t)"
         cursor.execute(sql, n=nom, ip=ip, p=port, u=user, m=mdp, t=id_type)
@@ -142,8 +141,6 @@ def modifier_base_cible(id_base, nom, ip, port, user, type_sgbd=None, mdp=None):
     conn = get_oracle_connection()
     try:
         cursor = conn.cursor()
-        
-        # Résolution de l'ID du type si fourni
         id_type = None
         if type_sgbd:
             cursor.execute("SELECT ID_TYPE_BASE FROM TYPE_BASE_CIBLE WHERE UPPER(NOM_TYPE) = UPPER(:t)", t=type_sgbd)
@@ -183,11 +180,8 @@ def supprimer_base_cible(id_base):
 # ==========================================
 # 3. MÉTRIQUES & PERFORMANCE (V$ VIEWS)
 # ==========================================
+
 def get_db_connection(id_base):
-    """
-    Récupère les identifiants et le type de la base, 
-    puis retourne la connexion correspondante (Oracle ou MySQL) et le type.
-    """
     conn_ref = get_oracle_connection()
     try:
         cursor = conn_ref.cursor()
@@ -206,25 +200,15 @@ def get_db_connection(id_base):
         user, mdp, ip, port, instance, type_sgbd = row
         type_upper = type_sgbd.upper()
         
-        # --- AIGUILLAGE MULTI-BASES ---
         if 'ORACLE' in type_upper:
             dsn = f"{ip}:{port}/{instance}"
             conn_cible = oracledb.connect(user=user, password=mdp, dsn=dsn)
             return conn_cible, "ORACLE", None
-            
         elif 'MYSQL' in type_upper:
-            conn_cible = mysql.connector.connect(
-                host=ip,
-                port=port,
-                user=user,
-                password=mdp,
-                database="mysql" 
-            )
+            conn_cible = mysql.connector.connect(host=ip, port=port, user=user, password=mdp, database="mysql")
             return conn_cible, "MYSQL", None
-            
         else:
             return None, None, f"Type de SGBD non supporté : {type_sgbd}"
-            
     except Exception as e:
         return None, None, f"Erreur de connexion : {str(e)}"
     finally:
@@ -249,12 +233,10 @@ def get_statistiques_sessions(id_base):
             result = {row[0]: row[1] for row in cursor.fetchall()}
         else: # MYSQL
             cursor.execute("SELECT COMMAND, COUNT(*) FROM information_schema.processlist GROUP BY COMMAND")
-            # Mapper MySQL Command -> Oracle Status pour le Frontend
             res_raw = {row[0]: row[1] for row in cursor.fetchall()}
             active = res_raw.get('Query', 0) + res_raw.get('Execute', 0)
             inactive = res_raw.get('Sleep', 0)
             result = {"ACTIVE": active, "INACTIVE": inactive}
-        
         conn.close()
         return result
     except: return None
@@ -278,11 +260,8 @@ def executer_audit_basique(id_base):
             ORDER BY EXECUTIONS DESC
         """)
         sql_top = [{
-            "SQL_ID": r[0], 
-            "SQL_TEXT": r[1], 
-            "EXECUTIONS": r[2], 
-            "LAST_ACTIVE_TIME": r[3].isoformat() if r[3] else None, 
-            "MEMORY_MB": r[4]
+            "SQL_ID": r[0], "SQL_TEXT": r[1], "EXECUTIONS": r[2], 
+            "LAST_ACTIVE_TIME": r[3].isoformat() if r[3] else None, "MEMORY_MB": r[4]
         } for r in cursor.fetchall()]
         conn.close()
         
@@ -290,14 +269,10 @@ def executer_audit_basique(id_base):
         ram_data = get_ram_stats(id_base)
         
         return True, "Audit terminé avec succès !", {
-            "version": version, 
-            "session": sessions, 
-            "sql": sql_top,
-            "cpu": cpu_data,
-            "ram": ram_data
+            "version": version, "session": sessions, "sql": sql_top,
+            "cpu": cpu_data, "ram": ram_data
         }
-    except Exception as e:
-        return False, f"Erreur : {e}", None
+    except Exception as e: return False, f"Erreur : {e}", None
 
 def get_cpu_stats(id_base):
     conn, db_type, err = get_db_connection(id_base)
@@ -316,9 +291,11 @@ def get_cpu_stats(id_base):
         else: # MYSQL
             cursor.execute("SHOW GLOBAL STATUS WHERE Variable_name IN ('Threads_running', 'Max_used_connections')")
             s = {r[0]: r[1] for r in cursor.fetchall()}
-            busy_pct = round((int(s.get('Threads_running', 0)) / max(int(s.get('Max_used_connections', 1)), 1)) * 100, 2)
-            res = {"busy_pct": busy_pct, "idle_pct": 100-busy_pct, "history": []}
-        
+            threads = int(s.get('Threads_running', 0))
+            max_conn = max(int(s.get('Max_used_connections', 1)), 1)
+            busy_pct = round((threads / max_conn) * 100, 2)
+            history = [{"User": "Active Threads", "CPU": threads}]
+            res = {"busy_pct": busy_pct, "idle_pct": 100-busy_pct, "history": history}
         conn.close()
         return res
     except: return None
@@ -344,8 +321,14 @@ def get_ram_stats(id_base):
         else: # MYSQL
             cursor.execute("SELECT SUM(data_length + index_length) / 1024 / 1024 FROM information_schema.TABLES")
             used = cursor.fetchone()[0] or 0
-            res = {"used_mb": round(used, 2), "max_mb": 1024, "ram_pct": round((used/1024)*100, 2), "sga_detail": []}
-            
+            cursor.execute("SHOW VARIABLES LIKE 'innodb_buffer_pool_size'")
+            row_pool = cursor.fetchone()
+            max_mb = (int(row_pool[1]) / 1024 / 1024) if row_pool else 1024
+            res = {
+                "used_mb": round(used, 2), "max_mb": round(max_mb, 2), 
+                "ram_pct": round((used/max_mb)*100, 2) if max_mb > 0 else 0, 
+                "sga_detail": [{"Composant": "Table Data", "Mo": round(used, 2)}, {"Composant": "InnoDB Buffer Pool", "Mo": round(max_mb, 2)}]
+            }
         conn.close()
         return res
     except: return None
@@ -365,28 +348,66 @@ def get_instance_status(id_base):
                 conn.close()
                 return {"status": "UP", "uptime_str": uptime_str, "startup_time": startup_time.isoformat()}
         else: # MYSQL
-            cursor.execute("SELECT VARIABLE_VALUE FROM information_schema.GLOBAL_STATUS WHERE VARIABLE_NAME='UPTIME'")
-            res = cursor.fetchone()
-            uptime_sec = int(res[0]) if res else 0
-            uptime_str = f"{uptime_sec//86400}j {(uptime_sec%86400)//3600}h {(uptime_sec%3600)//60}min"
-            conn.close()
-            return {"status": "UP", "uptime_str": uptime_str, "startup_time": None}
-        
+            uptime_sec = 0
+            try:
+                cursor.execute("SHOW GLOBAL STATUS LIKE 'Uptime'")
+                res = cursor.fetchone()
+                uptime_sec = int(res[1]) if res else 0
+            except:
+                try:
+                    cursor.execute("SELECT VARIABLE_VALUE FROM information_schema.GLOBAL_STATUS WHERE VARIABLE_NAME='UPTIME'")
+                    res = cursor.fetchone()
+                    uptime_sec = int(res[0]) if res else 0
+                except: pass
+            
+            if uptime_sec > 0:
+                delta = datetime.timedelta(seconds=uptime_sec)
+                uptime_str = f"{delta.days}j {delta.seconds//3600}h {(delta.seconds%3600)//60}min"
+                startup_time = (datetime.datetime.now() - delta).isoformat()
+                conn.close()
+                return {"status": "UP", "uptime_str": uptime_str, "startup_time": startup_time}
         conn.close()
         return {"status": "UP", "uptime_str": "Inconnue", "startup_time": None}
     except:
+        if conn: conn.close()
         return {"status": "DOWN", "uptime_str": "Inaccessible", "startup_time": None}
+
+def get_nodes_status(id_base):
+    conn, db_type, err = get_db_connection(id_base)
+    if err or not conn: return []
+    try:
+        cursor = conn.cursor()
+        if db_type == "ORACLE":
+            sql = "SELECT INSTANCE_NUMBER, INSTANCE_NAME, HOST_NAME, STATUS, DATABASE_STATUS FROM GV$INSTANCE"
+            df = pd.read_sql(sql, con=conn)
+        else: # MYSQL
+            sql = "SELECT @@hostname AS HOST_NAME, @@port AS INSTANCE_PORT, @@version AS VERSION, IF(@@read_only = 0, 'READ WRITE', 'READ ONLY') AS OPEN_MODE, 'ACTIVE' AS STATUS"
+            df = pd.read_sql(sql, con=conn)
+        conn.close()
+        return df.to_dict(orient='records')
+    except Exception as e:
+        if conn: conn.close()
+        return []
 
 # ==========================================
 # 4. SCRIPTS SQL & AUDIT
 # ==========================================
+
+def get_types_metriques():
+    conn = get_oracle_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT ID_TYPE_METRIQUE, NOM_TYPE_METRIQUE, DESCRIPTION FROM TYPE_METRIQUE")
+        return [{"id": r[0], "nom": r[1], "description": r[2]} for r in cursor.fetchall()]
+    finally:
+        if 'cursor' in locals(): cursor.close()
 
 def get_metriques_disponibles(id_type_base):
     conn = get_oracle_connection()
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT ID_METRIQUE, NOM_METRIQUE, SCRIPT_SQL FROM METRIQUE WHERE ID_TYPE_BASE = :type_id", type_id=id_type_base)
-        res: list[dict] = []
+        res = []
         for row in cursor.fetchall():
             script = row[2].read() if hasattr(row[2], 'read') else str(row[2])
             res.append({"ID": row[0], "Nom_Scripte": row[1], "Contenu_Script": script})
@@ -398,49 +419,46 @@ def get_all_metriques():
     conn = get_oracle_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT m.ID_METRIQUE, m.NOM_METRIQUE, m.SCRIPT_SQL, t.NOM_TYPE, m.ID_TYPE_BASE FROM METRIQUE m JOIN TYPE_BASE_CIBLE t ON m.ID_TYPE_BASE = t.ID_TYPE_BASE")
-        res: list[dict] = []
+        sql = """
+            SELECT m.ID_METRIQUE, m.NOM_METRIQUE, m.SCRIPT_SQL, t.NOM_TYPE, m.ID_TYPE_BASE, 
+                   tm.NOM_TYPE_METRIQUE, m.ID_TYPE_METRIQUE
+            FROM METRIQUE m 
+            LEFT JOIN TYPE_BASE_CIBLE t ON m.ID_TYPE_BASE = t.ID_TYPE_BASE
+            LEFT JOIN TYPE_METRIQUE tm ON m.ID_TYPE_METRIQUE = tm.ID_TYPE_METRIQUE
+        """
+        cursor.execute(sql)
+        res = []
         for r in cursor.fetchall():
             script = r[2].read() if hasattr(r[2], 'read') else str(r[2])
             res.append({
-                "ID": r[0], 
-                "Nom_Scripte": r[1], 
-                "Contenu_Script": script, 
-                "Type_Scripte": r[3], 
-                "id_type_base": r[4]
+                "ID": r[0], "Nom_Scripte": r[1], "Contenu_Script": script, 
+                "Type_Scripte": r[3] if r[3] else "Inconnu", "id_type_base": r[4],
+                "Categorie": r[5] if r[5] else "Sans catégorie", "id_type_metrique": r[6]
             })
         return res
     finally:
         if 'cursor' in locals(): cursor.close()
 
-def ajouter_metrique(nom, script_sql, type_scripte):
+def ajouter_metrique(nom, script_sql, id_type_base, id_type_metrique=2):
     conn = get_oracle_connection()
     try:
         cursor = conn.cursor()
-        # On essaie de trouver l'ID du type basé sur le nom
-        cursor.execute("SELECT ID_TYPE_BASE FROM TYPE_BASE_CIBLE WHERE NOM_TYPE = :t", t=type_scripte)
-        row = cursor.fetchone()
-        id_type = row[0] if row else 1 # ID 1 par défaut si non trouvé
-        
-        cursor.execute("INSERT INTO METRIQUE (NOM_METRIQUE, SCRIPT_SQL, ID_TYPE_BASE) VALUES (:nom, :script, :type)", 
-                       nom=nom, script=script_sql, type=id_type)
+        mid = id_type_metrique if id_type_metrique else 2
+        sql = "INSERT INTO METRIQUE (NOM_METRIQUE, SCRIPT_SQL, ID_TYPE_BASE, ID_TYPE_METRIQUE) VALUES (:nom, :script, :base, :met)"
+        cursor.execute(sql, nom=nom, script=script_sql, base=id_type_base, met=mid)
         conn.commit()
         return True, "Script ajouté avec succès"
     except Exception as e: return False, str(e)
     finally:
         if 'cursor' in locals(): cursor.close()
 
-def modifier_metrique(id_metrique, nom, script_sql, type_scripte):
+def modifier_metrique(id_metrique, nom, script_sql, id_type_base, id_type_metrique=2):
     conn = get_oracle_connection()
     try:
         cursor = conn.cursor()
-        # On essaie de trouver l'ID du type basé sur le nom
-        cursor.execute("SELECT ID_TYPE_BASE FROM TYPE_BASE_CIBLE WHERE NOM_TYPE = :t", t=type_scripte)
-        row = cursor.fetchone()
-        id_type = row[0] if row else 1 # ID 1 par défaut si non trouvé
-        
-        cursor.execute("UPDATE METRIQUE SET NOM_METRIQUE=:nom, SCRIPT_SQL=:script, ID_TYPE_BASE=:type WHERE ID_METRIQUE=:id", 
-                       nom=nom, script=script_sql, type=id_type, id=id_metrique)
+        mid = id_type_metrique if id_type_metrique else 2
+        sql = "UPDATE METRIQUE SET NOM_METRIQUE=:nom, SCRIPT_SQL=:script, ID_TYPE_BASE=:base, ID_TYPE_METRIQUE=:met WHERE ID_METRIQUE=:id"
+        cursor.execute(sql, nom=nom, script=script_sql, base=id_type_base, met=mid, id=id_metrique)
         conn.commit()
         return True, "Script mis à jour avec succès"
     except Exception as e: return False, str(e)
@@ -459,19 +477,13 @@ def supprimer_metrique(id_metrique):
         if 'cursor' in locals(): cursor.close()
 
 def executer_script_sur_cible(id_base, script_sql):
-    # 1. On appelle notre nouvelle fonction intelligente
-    conn_cible, erreur = get_db_connection(id_base)
-    
-    if erreur: 
-        return None, erreur
-        
+    conn_cible, type_db, erreur = get_db_connection(id_base)
+    if erreur: return None, erreur
     try:
-        # 2. Pandas est magique : il accepte les connexions Oracle ET MySQL !
         df = pd.read_sql(script_sql, con=conn_cible)
         conn_cible.close()
         return df.to_dict(orient='records'), None
-    except Exception as e: 
-        return None, str(e)
+    except Exception as e: return None, str(e)
 
 def verifier_index_tables(id_base, sql_script):
     creds = get_target_credentials(id_base)
@@ -479,7 +491,7 @@ def verifier_index_tables(id_base, sql_script):
     u, p, ip, port, ins = creds
     pattern = re.compile(r'(?:FROM|JOIN)\s+([a-zA-Z0-9_\$]+)', re.IGNORECASE)
     tables = list(set([m.upper() for m in pattern.findall(sql_script)]))
-    results: dict = {}
+    results = {}
     try:
         conn = oracledb.connect(user=u, password=p, dsn=f"{ip}:{port}/{ins}")
         cursor = conn.cursor()
@@ -490,6 +502,49 @@ def verifier_index_tables(id_base, sql_script):
         conn.close()
         return results
     except Exception as e: return {"error": str(e)}
+
+def get_explain_plan(id_base, sql_query):
+    query_clean = sql_query.strip().rstrip(';')
+    conn, db_type, err = get_db_connection(id_base)
+    if err or not conn: return None, err or "Inaccessible"
+    try:
+        cursor = conn.cursor()
+        if db_type == "ORACLE":
+            cursor.execute(f"EXPLAIN PLAN FOR {query_clean}")
+            cursor.execute("SELECT PLAN_TABLE_OUTPUT FROM TABLE(DBMS_XPLAN.DISPLAY())")
+            plan_text = "\n".join([str(r[0]) for r in cursor.fetchall()])
+        else: # MYSQL
+            cursor.execute(f"EXPLAIN {query_clean}")
+            res = cursor.fetchall()
+            plan_text = "MYSQL EXPLAIN:\n" + "\n".join([str(r) for r in res])
+        conn.close()
+        return plan_text, None
+    except Exception as e:
+        if conn: conn.close()
+        return None, str(e)
+
+def get_sql_plan_by_id(id_base, sql_id):
+    conn, db_type, err = get_db_connection(id_base)
+    if err or not conn: return None, err or "Inaccessible"
+    if db_type != "ORACLE": return "Oracle uniquement.", None
+    query = f"""
+        SELECT id, LPAD(' ', NVL(depth, 0)*2, ' ') || operation AS operation, object_name AS name, 
+               cardinality AS rows_est, cost AS cost_cpu, time AS time_sec 
+        FROM v$sql_plan WHERE sql_id = '{sql_id}' ORDER BY id
+    """
+    try:
+        df = pd.read_sql(query, con=conn)
+        conn.close()
+        res = []
+        for row in df.to_dict(orient='records'):
+            t = int(row.get('TIME_SEC') or 0)
+            res.append({
+                "id": row.get('ID'), "operation": row.get('OPERATION'), "name": str(row.get('NAME', '')),
+                "rows": row.get('ROWS_EST'), "cost": row.get('COST_CPU'),
+                "time": f"{t//3600:02d}:{(t%3600)//60:02d}:{t%60:02d}"
+            })
+        return res, None
+    except Exception as e: return None, str(e)
 
 # ==========================================
 # 5. EXTERNAL (GRAFANA)
@@ -503,96 +558,43 @@ def push_to_grafana(database_name, cpu, ram, sessions):
         requests.post(url, auth=auth, data=data, timeout=3)
         return True
     except: return False
-    
-def get_explain_plan(id_base, sql_query):
-    # On nettoie la requête
-    query_clean = sql_query.strip().rstrip(';')
-    conn, db_type, err = get_db_connection(id_base)
-    if err or not conn: return None, err or "Inaccessible"
 
+# ==========================================
+# 6. HISTORISATION DES MÉTRIQUES (NEW)
+# ==========================================
+
+def save_metrics_to_history(id_base, cpu, ram, sessions):
+    """ Sauvegarde un point de mesure dans la table locale METRICS_HISTORY """
+    conn = get_oracle_connection()
+    if not conn: return
     try:
         cursor = conn.cursor()
-        if db_type == "ORACLE":
-            # 1. Générer le plan (Doit être dans la MÊME session)
-            cursor.execute(f"EXPLAIN PLAN FOR {query_clean}")
-            # 2. Récupérer le plan
-            cursor.execute("SELECT PLAN_TABLE_OUTPUT FROM TABLE(DBMS_XPLAN.DISPLAY())")
-            plan_text = "\n".join([str(r[0]) for r in cursor.fetchall()])
-            conn.close()
-            return plan_text, None
-        else: # MYSQL
-            cursor.execute(f"EXPLAIN {query_clean}")
-            res = cursor.fetchall()
-            plan_text = "MYSQL EXPLAIN:\n" + "\n".join([str(r) for r in res])
-            conn.close()
-            return plan_text, None
-    except Exception as e:
-        if conn: conn.close()
-        return None, str(e)
+        sql = "INSERT INTO METRICS_HISTORY (ID_BASE, CPU_USAGE, RAM_USAGE, SESSIONS_COUNT) VALUES (:1, :2, :3, :4)"
+        cursor.execute(sql, (id_base, cpu, ram, sessions))
+        conn.commit()
+    except Exception as e: print(f"Erreur historique : {e}")
+    finally:
+        if 'conn' in locals(): conn.close()
 
-def get_sql_plan_by_id(id_base, sql_id):
-    conn, db_type, err = get_db_connection(id_base)
-    if err or not conn: return None, err or "Inaccessible"
-    
-    if db_type != "ORACLE":
-        return "Le plan par SQL_ID est uniquement supporté pour Oracle.", None
-
-    query = f"""
-    WITH plan_v AS (
-        SELECT 1 as source_rank, 
-            id,
-            LPAD(' ', NVL(depth, 0)*2, ' ') || operation || CASE WHEN options IS NOT NULL THEN ' ' || options ELSE '' END AS operation,
-            NVL(object_name, ' ') AS name,
-            NVL(cardinality, 0) AS rows_est,
-            NVL(cost, 0) || ' (' || NVL(TRUNC(cpu_cost/1000000), 0) || ')' AS cost_cpu,
-            NVL(time, 0) AS time_sec
-        FROM v$sql_plan 
-        WHERE sql_id = '{sql_id}' 
-        AND child_number = (SELECT MIN(child_number) FROM v$sql_plan WHERE sql_id = '{sql_id}')
-    ),
-    plan_hist AS (
-        SELECT 2 as source_rank, 
-            id,
-            LPAD(' ', NVL(depth, 0)*2, ' ') || operation || CASE WHEN options IS NOT NULL THEN ' ' || options ELSE '' END AS operation,
-            NVL(object_name, ' ') AS name,
-            NVL(cardinality, 0) AS rows_est,
-            NVL(cost, 0) || ' (' || NVL(TRUNC(cpu_cost/1000000), 0) || ')' AS cost_cpu,
-            NVL(time, 0) AS time_sec
-        FROM dba_hist_sql_plan 
-        WHERE sql_id = '{sql_id}'
-        AND plan_hash_value = (SELECT MIN(plan_hash_value) FROM dba_hist_sql_plan WHERE sql_id = '{sql_id}')
-    ),
-    combined AS (
-        SELECT * FROM plan_v
-        UNION ALL
-        SELECT * FROM plan_hist
-    )
-    SELECT id, operation, name, rows_est, cost_cpu, time_sec
-    FROM combined
-    WHERE source_rank = (SELECT MIN(source_rank) FROM combined)
-    ORDER BY id
-    """
+def get_history_from_oracle(id_base, time_range="24h"):
+    """ Récupère l'historique formaté pour les graphiques React """
+    conn = get_oracle_connection()
+    if not conn: return []
+    days = 1
+    if time_range == "7d": days = 7
+    elif time_range == "30d": days = 30
     try:
-        df = pd.read_sql(query, con=conn)
-        conn.close()
-        plan_data = df.to_dict(orient='records')
-        
-        resultat = []
-        for row in plan_data:
-            # On gère la casse car Pandas peut retourner MAJ ou min
-            row_keys = {k.upper(): v for k, v in row.items()}
-            time_sec = int(row_keys.get('TIME_SEC', 0))
-            time_format = f"{time_sec//3600:02d}:{(time_sec%3600)//60:02d}:{time_sec%60:02d}"
-            
-            resultat.append({
-                "id": row_keys.get('ID'),
-                "operation": row_keys.get('OPERATION'),
-                "name": str(row_keys.get('NAME', '')).strip(),
-                "rows": row_keys.get('ROWS_EST'),
-                "cost": row_keys.get('COST_CPU'),
-                "time": time_format
-            })
-        return resultat, None
+        cursor = conn.cursor()
+        sql = """
+            SELECT TO_CHAR(TIMESTAMP, 'DD/MM HH24:MI'), CPU_USAGE, RAM_USAGE, SESSIONS_COUNT
+            FROM METRICS_HISTORY
+            WHERE ID_BASE = :id AND TIMESTAMP >= SYSDATE - :d
+            ORDER BY TIMESTAMP ASC
+        """
+        cursor.execute(sql, id=id_base, d=days)
+        return [{"time": r[0], "cpu": r[1], "ram": r[2], "sessions": r[3]} for r in cursor.fetchall()]
     except Exception as e:
-        if conn: conn.close()
-        return None, str(e)
+        print(f"Erreur lecture historique : {e}")
+        return []
+    finally:
+        if 'conn' in locals(): conn.close()
