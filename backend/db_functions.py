@@ -231,12 +231,51 @@ def get_statistiques_sessions(id_base):
         if db_type == "ORACLE":
             cursor.execute("SELECT STATUS, COUNT(*) FROM v$session WHERE USERNAME IS NOT NULL GROUP BY STATUS")
             result = {row[0]: row[1] for row in cursor.fetchall()}
+            
+            # Sessions bloquées
+            try:
+                cursor.execute("SELECT COUNT(*) FROM v$session WHERE blocking_session IS NOT NULL")
+                row = cursor.fetchone()
+                result['BLOCKED'] = row[0] if row else 0
+            except:
+                result['BLOCKED'] = 0
+                
+            # Transactions
+            try:
+                cursor.execute("SELECT VALUE FROM v$sysmetric WHERE METRIC_NAME = 'User Commits Per Sec' AND ROWNUM = 1")
+                row = cursor.fetchone()
+                if row:
+                    result['TOTAL_TRANSACTIONS'] = round(float(row[0]), 2)
+                else:
+                    cursor.execute("SELECT COUNT(*) FROM v$transaction")
+                    row_tx = cursor.fetchone()
+                    result['TOTAL_TRANSACTIONS'] = row_tx[0] if row_tx else 0
+            except:
+                result['TOTAL_TRANSACTIONS'] = 0
+                
         else: # MYSQL
             cursor.execute("SELECT COMMAND, COUNT(*) FROM information_schema.processlist GROUP BY COMMAND")
             res_raw = {row[0]: row[1] for row in cursor.fetchall()}
             active = res_raw.get('Query', 0) + res_raw.get('Execute', 0)
             inactive = res_raw.get('Sleep', 0)
             result = {"ACTIVE": active, "INACTIVE": inactive}
+            
+            # Sessions bloquées
+            try:
+                cursor.execute("SELECT COUNT(*) FROM information_schema.innodb_trx WHERE trx_state = 'LOCK WAIT'")
+                row = cursor.fetchone()
+                result['BLOCKED'] = row[0] if row else 0
+            except:
+                result['BLOCKED'] = 0
+                
+            # Transactions actives
+            try:
+                cursor.execute("SELECT COUNT(*) FROM information_schema.innodb_trx")
+                row = cursor.fetchone()
+                result['TOTAL_TRANSACTIONS'] = row[0] if row else 0
+            except:
+                result['TOTAL_TRANSACTIONS'] = 0
+                
         conn.close()
         return result
     except: return None
@@ -254,14 +293,21 @@ def executer_audit_basique(id_base):
         sessions = [{"SID": r[0], "SERIAL#": r[1], "USERNAME": r[2], "STATUS": r[3], "MACHINE": r[4]} for r in cursor.fetchall()]
         cursor.execute("""
             SELECT SQL_ID, SUBSTR(SQL_TEXT,1,100), EXECUTIONS, 
-                   LAST_ACTIVE_TIME, ROUND(SHARABLE_MEM / 1024 / 1024, 2)
+                   LAST_ACTIVE_TIME, 
+                   ROUND(SHARABLE_MEM / 1024 / 1024, 2) AS SHARABLE_MB,
+                   ROUND(PERSISTENT_MEM / 1024 / 1024, 2) AS PERSISTENT_MB,
+                   ROUND(RUNTIME_MEM / 1024 / 1024, 2) AS RUNTIME_MB
             FROM v$sql 
             WHERE ROWNUM <= 10 
             ORDER BY EXECUTIONS DESC
         """)
         sql_top = [{
             "SQL_ID": r[0], "SQL_TEXT": r[1], "EXECUTIONS": r[2], 
-            "LAST_ACTIVE_TIME": r[3].isoformat() if r[3] else None, "MEMORY_MB": r[4]
+            "LAST_ACTIVE_TIME": r[3].isoformat() if r[3] else None, 
+            "SHARABLE_MB": r[4] or 0,
+            "PERSISTENT_MB": r[5] or 0,
+            "RUNTIME_MB": r[6] or 0,
+            "TOTAL_MEM_MB": round((r[4] or 0) + (r[5] or 0) + (r[6] or 0), 2)
         } for r in cursor.fetchall()]
         conn.close()
         

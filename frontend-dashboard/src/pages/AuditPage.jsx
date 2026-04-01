@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import api from '../api';
 import GlassCard from '../components/GlassCard';
 import { ShieldCheck, Database, Rocket, Info, Users, Activity, Loader2, AlertTriangle, ShieldAlert, Cpu, HardDrive, Bot } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
 
 export default function AuditPage({ onNavigate }) {
   const [bases, setBases]     = useState([]);
@@ -68,6 +69,43 @@ export default function AuditPage({ onNavigate }) {
     } finally {
       setLoadingPlan(false);
     }
+  };
+
+  const CustomSqlTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      return (
+        <div style={{ background: 'rgba(8, 14, 33, 0.95)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, padding: 16, boxShadow: '0 10px 25px rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)' }}>
+          <div style={{ color: '#a78bfa', fontSize: '0.8rem', marginBottom: 12, fontWeight: 700, fontFamily: 'Orbitron' }}>SQL ID: {label}</div>
+          {payload.map((p, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8, fontSize: '0.85rem' }}>
+              <span style={{ width: 8, height: 8, borderRadius: '2px', background: p.color }} />
+              <span style={{ color: '#cad4e0', flex: 1 }}>{p.name}</span>
+              <span style={{ color: p.color, fontWeight: 800 }}>{p.value.toFixed(2)} Mo</span>
+            </div>
+          ))}
+          <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.1)', fontSize: '0.9rem', fontWeight: 800, color: '#f8fafc', display: 'flex', justifyContent: 'space-between' }}>
+             <span>Total :</span>
+             <span style={{ color: '#38bdf8' }}>{(payload.reduce((acc, curr) => acc + curr.value, 0)).toFixed(2)} Mo</span>
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  const CustomPieTooltip = ({ active, payload }) => {
+    if (active && payload && payload.length) {
+      return (
+        <div style={{ background: 'rgba(8, 14, 33, 0.95)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, padding: 12, boxShadow: '0 10px 25px rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ width: 10, height: 10, borderRadius: '50%', background: payload[0].payload.fill }} />
+            <span style={{ color: '#f8fafc', fontWeight: 600 }}>{payload[0].name} : </span>
+            <span style={{ color: payload[0].payload.fill, fontWeight: 800 }}>{payload[0].value}%</span>
+          </div>
+        </div>
+      );
+    }
+    return null;
   };
 
   return (
@@ -161,43 +199,77 @@ export default function AuditPage({ onNavigate }) {
 
             {tab === 'sql' && (
               <div style={{ animation: 'fadeIn 0.3s' }}>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#f8fafc', marginBottom: 16 }}>Top 10 — Requêtes intensives en mémoire</h3>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#f8fafc', marginBottom: 20 }}>Répartition de l'Empreinte Mémoire (Top 10)</h3>
+                
                 {result.sql?.length ? (
-                  <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid var(--border-light)' }}>
-                    <table className="og-table">
-                      <thead style={{ background: 'rgba(15, 23, 42, 0.8)' }}>
-                        <tr>{['SQL_ID','Extrait SQL','Fréquence Exécution','Dernière Exécution','Mémoire (Mo)'].map(h => <th key={h}>{h}</th>)}</tr>
-                      </thead>
-                      <tbody>{result.sql.map((s,i) => (
-                        <tr 
-                          key={i}
-                          onClick={() => fetchExecutionPlan(selected, s.SQL_ID)}
-                          style={{ 
-                            cursor: 'pointer', 
-                            backgroundColor: activeSqlId === s.SQL_ID ? 'rgba(139, 92, 246, 0.15)' : 'transparent',
-                            transition: 'background-color 0.2s ease'
-                          }}
-                        >
-                          <td><span className="badge badge-purple" style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '0.75rem' }}>{s.SQL_ID}</span></td>
-                          <td style={{ fontFamily: "'Fira Code', monospace", fontSize: '0.8rem', maxWidth: 450, color: '#bae6fd', letterSpacing: '0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {s.SQL_TEXT}
-                          </td>
-                          <td>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                              <span className="title-font" style={{ fontWeight: 700, color: '#f8fafc' }}>{s.EXECUTIONS}</span>
-                              {s.EXECUTIONS > 500 && <AlertTriangle size={14} color="#f59e0b" />}
-                            </div>
-                          </td>
-                          <td style={{ fontSize: '0.85rem', color: '#94a3b8' }}>
-                            {s.LAST_ACTIVE_TIME ? new Date(s.LAST_ACTIVE_TIME).toLocaleString() : 'N/A'}
-                          </td>
-                          <td style={{ fontSize: '0.85rem', color: '#38bdf8', fontWeight: 600 }}>
-                            {s.MEMORY_MB !== null ? `${s.MEMORY_MB} Mo` : 'N/A'}
-                          </td>
-                        </tr>
-                      ))}</tbody>
-                    </table>
-                  </div>
+                  <>
+                    <div style={{ height: 320, width: '100%', marginBottom: 30, background: 'rgba(15, 23, 42, 0.3)', borderRadius: 16, padding: '20px 20px 10px 0', border: '1px solid rgba(255,255,255,0.05)' }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={result.sql.map((s, idx) => ({ ...s, rank: idx + 1 }))} margin={{ top: 10, right: 30, left: 20, bottom: 20 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                          <XAxis 
+                            dataKey="rank" 
+                            stroke="#64748b" 
+                            tick={{ fontSize: 11, fontFamily: 'Orbitron', fontWeight: 800 }} 
+                            axisLine={false}
+                            tickLine={false}
+                            dy={10}
+                            label={{ value: 'Rang (Top)', position: 'insideBottom', offset: -10, fill: '#64748b', fontSize: 10 }}
+                          />
+                          <YAxis 
+                            stroke="#64748b" 
+                            tick={{ fontSize: 11 }} 
+                            unit=" Mo" 
+                            axisLine={false}
+                            tickLine={false}
+                          />
+                          <Tooltip content={<CustomSqlTooltip />} />
+                          <Legend wrapperStyle={{ paddingTop: 20, fontSize: 12 }} iconType="rect" verticalAlign="bottom" />
+                          <Bar name="Mémoire Partageable" dataKey="SHARABLE_MB" stackId="sql" fill="#0ea5e9" radius={[0, 0, 0, 0]} />
+                          <Bar name="Mémoire Persistante" dataKey="PERSISTENT_MB" stackId="sql" fill="#8b5cf6" radius={[0, 0, 0, 0]} />
+                          <Bar name="Mémoire d'Exécution" dataKey="RUNTIME_MB" stackId="sql" fill="#10b981" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#f8fafc', marginBottom: 16 }}>Top 10 — Détail des requêtes</h3>
+                    <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid var(--border-light)' }}>
+                      <table className="og-table">
+                        <thead style={{ background: 'rgba(15, 23, 42, 0.8)' }}>
+                          <tr>{['#', 'SQL_ID','Extrait SQL','Fréquence','Dernière Exécution','Mémoire Totale (Mo)'].map(h => <th key={h}>{h}</th>)}</tr>
+                        </thead>
+                        <tbody>{result.sql.map((s,i) => (
+                          <tr 
+                            key={i}
+                            onClick={() => fetchExecutionPlan(selected, s.SQL_ID)}
+                            style={{ 
+                              cursor: 'pointer', 
+                              backgroundColor: activeSqlId === s.SQL_ID ? 'rgba(139, 92, 246, 0.15)' : 'transparent',
+                              transition: 'background-color 0.2s ease'
+                            }}
+                          >
+                            <td style={{ fontWeight: 800, color: '#38bdf8', fontSize: '1rem', textAlign: 'center' }}>{i + 1}</td>
+                            <td><span className="badge badge-purple" style={{ fontFamily: "'Orbitron', sans-serif", fontSize: '0.75rem' }}>{s.SQL_ID}</span></td>
+                            <td style={{ fontFamily: "'Fira Code', monospace", fontSize: '0.8rem', maxWidth: 450, color: '#bae6fd', letterSpacing: '0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {s.SQL_TEXT}
+                            </td>
+                            <td>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                <span className="title-font" style={{ fontWeight: 700, color: '#f8fafc' }}>{s.EXECUTIONS}</span>
+                                {s.EXECUTIONS > 500 && <AlertTriangle size={14} color="#f59e0b" />}
+                              </div>
+                            </td>
+                            <td style={{ fontSize: '0.85rem', color: '#94a3b8' }}>
+                              {s.LAST_ACTIVE_TIME ? new Date(s.LAST_ACTIVE_TIME).toLocaleString() : 'N/A'}
+                            </td>
+                            <td style={{ fontSize: '0.85rem', color: '#38bdf8', fontWeight: 800 }}>
+                              {s.TOTAL_MEM_MB !== null ? `${s.TOTAL_MEM_MB} Mo` : 'N/A'}
+                            </td>
+                          </tr>
+                        ))}</tbody>
+                      </table>
+                    </div>
+                  </>
                 ) : <div className="alert alert-info"><Info size={18} /> Aucune information de requête coûteuse remontée par l'instance.</div>}
 
                 {/* --- AFFICHAGE DU PLAN D'EXÉCUTION MODIFIÉ --- */}
@@ -281,8 +353,32 @@ export default function AuditPage({ onNavigate }) {
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: 1 }}>Inactif</div>
-                    <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#f8fafc' }}>{result.cpu.idle_pct}%</div>
                   </div>
+                </div>
+
+                <div style={{ height: 350, background: 'rgba(15, 23, 42, 0.4)', borderRadius: 12, padding: 20, marginBottom: 24, border: '1px solid rgba(56, 189, 248, 0.2)' }}>
+                  <h4 style={{ fontSize: '0.95rem', fontWeight: 600, color: '#e2e8f0', marginBottom: 16, textAlign: 'center' }}>Répartition CPU (Actif / Inactif)</h4>
+                  <ResponsiveContainer width="100%" height="90%">
+                    <PieChart>
+                      <Pie
+                        data={[
+                          { name: 'Actif', value: parseFloat((result.cpu.busy_pct).toFixed(1)), fill: '#0ea5e9' },
+                          { name: 'Inactif', value: parseFloat((result.cpu.idle_pct).toFixed(1)), fill: '#64748b' }
+                        ]}
+                        cx="50%" cy="50%" innerRadius={70} outerRadius={110} paddingAngle={2} dataKey="value"
+                        animationDuration={1500}
+                      >
+                        {[
+                          { name: 'Actif', value: parseFloat((result.cpu.busy_pct).toFixed(1)), fill: '#0ea5e9' },
+                          { name: 'Inactif', value: parseFloat((result.cpu.idle_pct).toFixed(1)), fill: '#64748b' }
+                        ].map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.fill} />
+                        ))}
+                      </Pie>
+                      <Tooltip content={<CustomPieTooltip />} />
+                      <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                    </PieChart>
+                  </ResponsiveContainer>
                 </div>
 
                 <h4 style={{ fontSize: '0.95rem', fontWeight: 600, color: '#e2e8f0', marginBottom: 12 }}>Top 5 Utilisateurs CPU</h4>
@@ -333,25 +429,83 @@ export default function AuditPage({ onNavigate }) {
                   </div>
                 </div>
 
-                <h4 style={{ fontSize: '0.95rem', fontWeight: 600, color: '#e2e8f0', marginBottom: 12 }}>Classification Allocation SGA</h4>
-                {result.ram.sga_detail?.length ? (
-                  <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid var(--border-light)' }}>
-                    <table className="og-table">
-                      <thead style={{ background: 'rgba(15, 23, 42, 0.8)' }}>
-                        <tr>
-                          <th>Composant SGA</th>
-                          <th>Mémoire Allouée (Mo)</th>
-                        </tr>
-                      </thead>
-                      <tbody>{result.ram.sga_detail.map((c, i) => (
-                        <tr key={i}>
-                          <td style={{ color: '#10b981', fontWeight: 500 }}>{c.Composant}</td>
-                          <td className="title-font" style={{ fontWeight: 700, color: '#e2e8f0' }}>{c.Mo} Mo</td>
-                        </tr>
-                      ))}</tbody>
-                    </table>
+                <div style={{ display: 'flex', gap: 24, marginBottom: 24, flexDirection: 'row', flexWrap: 'wrap' }}>
+                  <div style={{ flex: '1 1 450px', height: 400, background: 'rgba(15, 23, 42, 0.4)', borderRadius: 12, padding: 20, border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                    <h4 style={{ fontSize: '0.95rem', fontWeight: 600, color: '#e2e8f0', marginBottom: 16, textAlign: 'center' }}>Répartition Globale Mémoire (% de {result.ram.max_mb} Mo)</h4>
+                    <ResponsiveContainer width="100%" height="88%">
+                      <PieChart>
+                        <Pie
+                          data={(function() {
+                            const max = result.ram.max_mb;
+                            // Prevenir crash si max_mb = 0
+                            if (!max || max <= 0) return [];
+                            const free = Math.max(0, max - result.ram.used_mb);
+                            let data = [
+                              { name: 'Mémoire Libre', value: parseFloat((free / max * 100).toFixed(1)), fill: '#334155' },
+                              { name: 'PGA Totale', value: parseFloat((result.ram.pga_total_mb / max * 100).toFixed(1)), fill: '#10b981' }
+                            ];
+                            const baseColors = ['#8b5cf6', '#d946ef', '#f43f5e', '#3b82f6', '#0ea5e9', '#14b8a6'];
+                            if (result.ram.sga_detail) {
+                              result.ram.sga_detail.forEach((c, idx) => {
+                                if (c.Composant !== 'Total SGA' && c.Composant !== 'Maximum SGA Size') {
+                                  let pct = parseFloat((c.Mo / max * 100).toFixed(1));
+                                  if (pct > 0) data.push({ name: c.Composant, value: pct, fill: baseColors[idx % baseColors.length] });
+                                }
+                              });
+                            }
+                            return data;
+                          })()}
+                          cx="50%" cy="50%" innerRadius={70} outerRadius={120} paddingAngle={2} dataKey="value"
+                          animationDuration={1500}
+                        >
+                          {(function() {
+                            const max = result.ram.max_mb;
+                            if (!max || max <= 0) return [];
+                            const free = Math.max(0, max - result.ram.used_mb);
+                            let data = [
+                              { name: 'Mémoire Libre', value: parseFloat((free / max * 100).toFixed(1)), fill: '#334155' },
+                              { name: 'PGA Totale', value: parseFloat((result.ram.pga_total_mb / max * 100).toFixed(1)), fill: '#10b981' }
+                            ];
+                            const baseColors = ['#8b5cf6', '#d946ef', '#f43f5e', '#3b82f6', '#0ea5e9', '#14b8a6'];
+                            if (result.ram.sga_detail) {
+                              result.ram.sga_detail.forEach((c, idx) => {
+                                if (c.Composant !== 'Total SGA' && c.Composant !== 'Maximum SGA Size') {
+                                  let pct = parseFloat((c.Mo / max * 100).toFixed(1));
+                                  if (pct > 0) data.push({ name: c.Composant, value: pct, fill: baseColors[idx % baseColors.length] });
+                                }
+                              });
+                            }
+                            return data.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.fill} />);
+                          })()}
+                        </Pie>
+                        <Tooltip content={<CustomPieTooltip />} />
+                        <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: '0.8rem', paddingLeft: 10, paddingRight: 10 }} />
+                      </PieChart>
+                    </ResponsiveContainer>
                   </div>
-                ) : <div className="alert alert-info"><Info size={18} /> Aucun détail SGA disponible.</div>}
+
+                  <div style={{ flex: '1 1 350px' }}>
+                    <h4 style={{ fontSize: '0.95rem', fontWeight: 600, color: '#e2e8f0', marginBottom: 12 }}>Classification Allocation SGA</h4>
+                    {result.ram.sga_detail?.length ? (
+                      <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid var(--border-light)' }}>
+                        <table className="og-table">
+                          <thead style={{ background: 'rgba(15, 23, 42, 0.8)' }}>
+                            <tr>
+                              <th>Composant SGA</th>
+                              <th>Mémoire Allouée (Mo)</th>
+                            </tr>
+                          </thead>
+                          <tbody>{result.ram.sga_detail.map((c, i) => (
+                            <tr key={i}>
+                              <td style={{ color: '#10b981', fontWeight: 500 }}>{c.Composant}</td>
+                              <td className="title-font" style={{ fontWeight: 700, color: '#e2e8f0' }}>{c.Mo} Mo</td>
+                            </tr>
+                          ))}</tbody>
+                        </table>
+                      </div>
+                    ) : <div className="alert alert-info"><Info size={18} /> Aucun détail SGA disponible.</div>}
+                  </div>
+                </div>
               </div>
             )}
           </div>

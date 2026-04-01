@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import api from '../api';
 import GlassCard from '../components/GlassCard';
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, Area, AreaChart
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, Area, AreaChart,
+  PieChart, Pie, Cell
 } from 'recharts';
 import { Activity, Server, Users, RefreshCw, PlugZap, Clock, Target, Database, Shield, Calendar } from 'lucide-react';
 
@@ -10,6 +11,8 @@ const KPI_OPTIONS = [
   { key: 'CPU',      label: 'Charge CPU',       unit: '%', color: '#0ea5e9', Icon: Activity },
   { key: 'RAM',      label: 'Mémoire RAM',      unit: '%', color: '#8b5cf6', Icon: Server },
   { key: 'Sessions', label: 'Sessions Actives', unit: '',  color: '#10b981', Icon: Users },
+  { key: 'Transactions', label: 'Transactions', unit: '',  color: '#f59e0b', Icon: RefreshCw },
+  { key: 'Blocked', label: 'Blocages', unit: '',  color: '#ef4444', Icon: Shield },
 ];
 
 function StatusBanner({ status }) {
@@ -48,6 +51,49 @@ function StatusBanner({ status }) {
           )}
         </div>
       </GlassCard>
+    </div>
+  );
+}
+
+function GaugeChart({ value, label, unit, color, maxValue = 100, displayValue }) {
+  const arcValue = Math.min(100, (value / (maxValue || 1)) * 100);
+  const data = [
+    { value: arcValue, fill: color },
+    { value: Math.max(0, 100 - arcValue), fill: 'rgba(255,255,255,0.05)' }
+  ];
+
+  return (
+    <div style={{ textAlign: 'center', position: 'relative', height: 160 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <PieChart>
+          <Pie
+            data={data}
+            cx="50%"
+            cy="85%"
+            startAngle={180}
+            endAngle={0}
+            innerRadius={65}
+            outerRadius={85}
+            paddingAngle={0}
+            dataKey="value"
+            stroke="none"
+            animationDuration={1500}
+            animationBegin={0}
+          >
+            {data.map((entry, index) => (
+              <Cell key={`cell-${index}`} fill={entry.fill} />
+            ))}
+          </Pie>
+        </PieChart>
+      </ResponsiveContainer>
+      <div style={{ position: 'absolute', bottom: '15%', left: '50%', transform: 'translateX(-50%)', textAlign: 'center', width: '100%' }}>
+        <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#f8fafc', textShadow: `0 0 20px ${color}40` }}>
+          {displayValue !== undefined ? displayValue : Number(value).toFixed(1)}{unit}
+        </div>
+        <div style={{ fontSize: '0.7rem', color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.15em' }}>
+          {label}
+        </div>
+      </div>
     </div>
   );
 }
@@ -96,35 +142,17 @@ export default function DashboardPage() {
           if (id === ids[0]) setNodes(data.nodes || []);
           const cpu  = data.cpu?.busy_pct ?? 0;
           const ram  = data.ram?.ram_pct  ?? 0;
-          const sess = (data.sessions?.ACTIVE ?? 0) + (data.sessions?.INACTIVE ?? 0);
+          const sess = data.sessions?.ACTIVE ?? 0;
+          const blocked = data.sessions?.BLOCKED ?? 0;
+          const trans = data.sessions?.TOTAL_TRANSACTIONS ?? 0;
 
-          const alreadyLoaded = historyRef.current.some(h => h.Nom_Base === base.Instance);
-          if (!alreadyLoaded) {
-            // Astuce : On génère plus de points fictifs si on est sur un filtre long pour la démo
-            const pointsToGenerate = timeFilter === '24h' ? 24 : 72; 
-            for (let i = pointsToGenerate; i > 0; i--) {
-              const t = new Date(now - i * 3600 * 1000).toISOString();
-              historyRef.current.push({
-                Heure: t, Nom_Base: base.Instance,
-                CPU:  Math.max(0, Math.min(100, cpu + (Math.random()-0.5)*15)),
-                RAM:  Math.max(0, Math.min(100, ram + (Math.random()-0.5)*8)),
-                Sessions: Math.max(0, sess + Math.round((Math.random()-0.5)*3))
-              });
-            }
-          }
-          historyRef.current.push({ Heure: now.toISOString(), Nom_Base: base.Instance, CPU: cpu, RAM: ram, Sessions: sess });
+          historyRef.current = [{ 
+            Heure: now.toISOString(), Nom_Base: base.Instance, 
+            CPU: cpu, RAM: ram, Sessions: sess,
+            Blocked: blocked, Transactions: trans 
+          }];
         } catch { /* skip */ }
       }
-
-      // MODIFICATION : Calcul dynamique de la limite de temps pour le nettoyage
-      let hours = 24;
-      if (timeFilter === '7d') hours = 24 * 7;
-      else if (timeFilter === '14d') hours = 24 * 14;
-      else if (timeFilter === '1m') hours = 24 * 30;
-      else if (timeFilter === '3m') hours = 24 * 90;
-
-      const cutoff = new Date(Date.now() - hours * 3600 * 1000).toISOString();
-      historyRef.current = historyRef.current.filter(h => h.Heure >= cutoff);
       
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(historyRef.current)); } catch { /* ignore */ }
       setHistoryDisplay([...historyRef.current]);
@@ -139,38 +167,8 @@ export default function DashboardPage() {
   const selectedNames = selected.map(id => bases.find(b => b.ID === id)?.Instance).filter(Boolean);
   const filteredHistory = historyDisplay.filter(h => selectedNames.includes(h.Nom_Base));
 
-  const byTime = {};
-  filteredHistory.forEach(h => {
-    if (!byTime[h.Heure]) byTime[h.Heure] = { Heure: h.Heure };
-    byTime[h.Heure][h.Nom_Base] = h[kpi];
-  });
-  // On récupère plus de points pour les graphiques longs
-  const chartData = Object.values(byTime).sort((a,b) => a.Heure.localeCompare(b.Heure)).slice(-150);
-
-  const COLORS = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ec4899'];
-  const currentKpi = KPI_OPTIONS.find(k => k.key === kpi);
   const lastEntries = {};
   filteredHistory.forEach(h => { lastEntries[h.Nom_Base] = h; });
-
-  const CustomTooltip = ({ active, payload, label }) => {
-    if (active && payload && payload.length) {
-      return (
-        <div style={{ background: 'rgba(8, 14, 33, 0.95)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, padding: 16, boxShadow: '0 10px 25px rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)' }}>
-          <div style={{ color: '#94a3b8', fontSize: '0.75rem', marginBottom: 12, paddingBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.05)', fontWeight: 600 }}>
-            {new Date(label).toLocaleString('fr-FR', { day:'2-digit', month:'long', hour:'2-digit', minute:'2-digit' })}
-          </div>
-          {payload.map((p, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8, fontSize: '0.85rem' }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: p.color, boxShadow: `0 0 10px ${p.color}` }} />
-              <span style={{ color: '#e2e8f0', fontWeight: 500, flex: 1 }}>{p.name}</span>
-              <span style={{ color: p.color, fontWeight: 800 }}>{Number(p.value).toFixed(1)}{currentKpi.unit}</span>
-            </div>
-          ))}
-        </div>
-      );
-    }
-    return null;
-  };
 
   return (
     <div>
@@ -183,7 +181,6 @@ export default function DashboardPage() {
       </div>
 
       {error && <div className="alert alert-error"><Shield size={18} /> {error}</div>}
-
       <GlassCard style={{ marginBottom: 32, padding: '20px 24px' }}>
         <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 250 }}>
@@ -235,62 +232,94 @@ export default function DashboardPage() {
         })}
       </div>
 
-      <GlassCard style={{ marginBottom: 32, padding: '32px 24px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <currentKpi.Icon size={20} color={currentKpi.color} />
-            <h2 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>Évolution — {currentKpi.label}</h2>
+      <div className="grid-2" style={{ marginBottom: 32 }}>
+        <GlassCard accent="#0ea5e9" style={{ padding: '24px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+            <Activity size={18} color="#0ea5e9" />
+            <h3 style={{ fontSize: '0.9rem', fontWeight: 700, margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Utilisation CPU</h3>
           </div>
-          
-          {/* MODIFICATION : Le filtre de temps stylisé */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(15, 23, 42, 0.6)', padding: '6px 14px', borderRadius: 20, border: '1px solid rgba(255,255,255,0.1)' }}>
-            <Calendar size={14} color="#94a3b8" />
-            <select 
-              value={timeFilter}
-              onChange={(e) => setTimeFilter(e.target.value)}
-              style={{ background: 'transparent', color: '#e2e8f0', border: 'none', outline: 'none', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', appearance: 'none', paddingRight: '10px' }}
-            >
-              <option value="24h" style={{ background: '#0f172a' }}>Dernières 24h</option>
-              <option value="7d" style={{ background: '#0f172a' }}>1 Semaine</option>
-              <option value="14d" style={{ background: '#0f172a' }}>2 Semaines</option>
-              <option value="1m" style={{ background: '#0f172a' }}>1 Mois</option>
-              <option value="3m" style={{ background: '#0f172a' }}>3 Mois</option>
-            </select>
-          </div>
+          <GaugeChart 
+            value={selectedNames.length === 1 && lastEntries[selectedNames[0]] ? lastEntries[selectedNames[0]].CPU : 0} 
+            label="Charge Actuelle" 
+            unit="%" 
+            color="#0ea5e9" 
+          />
+        </GlassCard>
 
-        </div>
-        
-        {chartData.length === 0 ? (
-          <div style={{ textAlign: 'center', color: '#475569', padding: '60px 0', border: '1px dashed rgba(255,255,255,0.1)', borderRadius: 16 }}>
-            <Activity size={48} style={{ opacity: 0.2, margin: '0 auto 16px' }} />
-            <div style={{ fontSize: '0.9rem', fontWeight: 500 }}>Données insuffisantes.</div>
+        <GlassCard accent="#8b5cf6" style={{ padding: '24px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+            <Server size={18} color="#8b5cf6" />
+            <h3 style={{ fontSize: '0.9rem', fontWeight: 700, margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Utilisation RAM</h3>
           </div>
-        ) : (
-          <ResponsiveContainer width="100%" height={380}>
-            <AreaChart data={chartData} margin={{ top: 10, right: 30, left: -20, bottom: 0 }}>
-              <defs>
-                {selectedNames.map((name, i) => (
-                  <linearGradient key={`color-${name}`} id={`color-${name}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={COLORS[i % COLORS.length]} stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor={COLORS[i % COLORS.length]} stopOpacity={0}/>
-                  </linearGradient>
-                ))}
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-              <XAxis dataKey="Heure" tickFormatter={v => new Date(v).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}
-                stroke="#475569" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} dy={10} />
-              <YAxis stroke="#475569" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false}
-                domain={kpi !== 'Sessions' ? [0,100] : ['auto','auto']} unit={currentKpi.unit} dx={-10} />
-              <Tooltip content={<CustomTooltip />} />
-              <Legend wrapperStyle={{ paddingTop: 20, fontSize: 12, color: '#94a3b8' }} iconType="circle" />
-              {selectedNames.map((name,i) => (
-                <Area key={name} type="monotone" dataKey={name} stroke={COLORS[i%COLORS.length]}
-                  strokeWidth={3} fillOpacity={1} fill={`url(#color-${name})`} activeDot={{ r: 6, strokeWidth: 0, fill: COLORS[i%COLORS.length], style: { filter: `drop-shadow(0 0 8px ${COLORS[i%COLORS.length]})` } }} />
-              ))}
-            </AreaChart>
-          </ResponsiveContainer>
-        )}
-      </GlassCard>
+          <GaugeChart 
+            value={selectedNames.length === 1 && lastEntries[selectedNames[0]] ? lastEntries[selectedNames[0]].RAM : 0} 
+            label="Mémoire Occupée" 
+            unit="%" 
+            color="#8b5cf6" 
+          />
+        </GlassCard>
+      </div>
+
+      <div className="grid-3" style={{ marginBottom: 32 }}>
+        <GlassCard accent="#f59e0b" style={{ padding: '24px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+            <RefreshCw size={18} color="#f59e0b" />
+            <h3 style={{ fontSize: '0.9rem', fontWeight: 700, margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Taux de Transaction</h3>
+          </div>
+          <GaugeChart 
+            value={selectedNames.length === 1 && lastEntries[selectedNames[0]] ? lastEntries[selectedNames[0]].Transactions : 0} 
+            displayValue={selectedNames.length === 1 && lastEntries[selectedNames[0]] ? lastEntries[selectedNames[0]].Transactions : 0}
+            maxValue={1000}
+            label="Débit (Commits)" 
+            unit="" 
+            color="#f59e0b" 
+          />
+        </GlassCard>
+
+        <GlassCard accent="#10b981" style={{ padding: '24px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+            <Users size={18} color="#10b981" />
+            <h3 style={{ fontSize: '0.9rem', fontWeight: 700, margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Connexions Actives</h3>
+          </div>
+          <GaugeChart 
+            value={selectedNames.length === 1 && lastEntries[selectedNames[0]] ? lastEntries[selectedNames[0]].Sessions : 0} 
+            displayValue={selectedNames.length === 1 && lastEntries[selectedNames[0]] ? lastEntries[selectedNames[0]].Sessions : 0}
+            maxValue={200}
+            label="Utilisateurs" 
+            unit="" 
+            color="#10b981" 
+          />
+        </GlassCard>
+
+        <GlassCard 
+          accent="#ef4444" 
+          glow={selectedNames.length === 1 && lastEntries[selectedNames[0]]?.Blocked > 0}
+          style={{ 
+            padding: '24px', 
+            background: (selectedNames.length === 1 && lastEntries[selectedNames[0]]?.Blocked > 0) ? 'rgba(239, 68, 68, 0.1)' : undefined,
+            border: (selectedNames.length === 1 && lastEntries[selectedNames[0]]?.Blocked > 0) ? '1px solid #ef444450' : undefined
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+            <Shield size={18} color="#ef4444" />
+            <h3 style={{ fontSize: '0.9rem', fontWeight: 700, margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Sessions Bloquées</h3>
+          </div>
+          <div style={{ textAlign: 'center', padding: '20px 0' }}>
+            <div style={{ 
+              fontSize: '3.5rem', 
+              fontWeight: 900, 
+              color: (selectedNames.length === 1 && lastEntries[selectedNames[0]]?.Blocked > 0) ? '#ef4444' : '#f8fafc',
+              textShadow: (selectedNames.length === 1 && lastEntries[selectedNames[0]]?.Blocked > 0) ? '0 0 30px #ef4444' : 'none',
+              animation: (selectedNames.length === 1 && lastEntries[selectedNames[0]]?.Blocked > 0) ? 'pulseGlow 1.5s infinite' : 'none'
+            }}>
+              {selectedNames.length === 1 && lastEntries[selectedNames[0]] ? lastEntries[selectedNames[0]].Blocked : 0}
+            </div>
+            <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 700, marginTop: 10 }}>
+              {selectedNames.length === 1 && lastEntries[selectedNames[0]]?.Blocked > 0 ? 'ALERTE : CONFLITS DÉTECTÉS' : 'AUCUN BLOCAGE'}
+            </div>
+          </div>
+        </GlassCard>
+      </div>
 
       {nodes.length > 0 && (
         <GlassCard style={{ padding: '32px 24px', marginBottom: 32 }}>

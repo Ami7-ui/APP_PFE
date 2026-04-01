@@ -72,46 +72,6 @@ class AuditAnalysisRequest(BaseModel):
     id_base: int
 
 # ── COLLECTEUR AUTOMATIQUE (BACKGROUND TASK) ──────────────────────────────────
-
-def monitoring_worker():
-    """ Collecteur qui tourne en arrière-plan toutes les 5 minutes """
-    print("🚀 Collecteur automatique de métriques démarré...")
-    while True:
-        try:
-            bases = db_functions.get_bases_cibles() 
-            for base in bases:
-                # IMPORTANT : db_functions renvoie {'ID': ...}
-                id_base = base.get('ID')
-                if not id_base: continue
-
-                status = db_functions.get_instance_status(id_base)
-                
-                if status.get("status") == "UP":
-                    cpu = db_functions.get_cpu_stats(id_base)
-                    ram = db_functions.get_ram_stats(id_base)
-                    sess = db_functions.get_statistiques_sessions(id_base)
-
-                    total_sess = 0
-                    if sess:
-                        total_sess = (sess.get('ACTIVE', 0) or 0) + (sess.get('INACTIVE', 0) or 0)
-
-                    # Sauvegarde dans la table METRICS_HISTORY d'Oracle
-                    db_functions.save_metrics_to_history(
-                        id_base, 
-                        cpu.get('busy_pct', 0) if cpu else 0, 
-                        ram.get('ram_pct', 0) if ram else 0, 
-                        total_sess
-                    )
-        except Exception as e:
-            print(f"❌ Erreur dans le collecteur : {e}")
-
-        time.sleep(300) # Pause de 5 minutes
-
-@app.on_event("startup")
-def startup_event():
-    thread = threading.Thread(target=monitoring_worker, daemon=True)
-    thread.start()
-
 # ── ROUTES AUTHENTIFICATION ───────────────────────────────────────────────────
 
 @app.post("/api/login")
