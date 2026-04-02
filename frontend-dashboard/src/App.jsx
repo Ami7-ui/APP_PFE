@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import './index.css';
 import Sidebar from './components/Sidebar';
 import LoginPage from './pages/LoginPage';
@@ -8,9 +9,19 @@ import ConfigurationPage from './pages/ConfigurationPage';
 import CiblesPage from './pages/CiblesPage';
 import ScriptsPage from './pages/ScriptsPage';
 import UsersPage from './pages/UsersPage';
-
-// NOUVEAU : On importe la nouvelle page de l'Assistant IA
 import AiAssistantPage from './pages/AiAssistantPage'; 
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: Infinity,
+      refetchOnWindowFocus: false,
+      refetchOnMount: false,
+      refetchOnReconnect: false,
+      retry: false,
+    },
+  },
+});
 
 class ErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { hasError: false, error: null }; }
@@ -42,7 +53,7 @@ const PAGE_COMPONENTS = {
   cibles:        CiblesPage,
   scripts:       ScriptsPage,
   users:         UsersPage,
-  assistant_ia:  AiAssistantPage, // NOUVEAU : On ajoute la route pour l'IA
+  assistant_ia:  AiAssistantPage,
 };
 
 export default function App() {
@@ -72,16 +83,18 @@ export default function App() {
   const PageComponent = PAGE_COMPONENTS[page] || DashboardPage;
 
   return (
-    <ErrorBoundary>
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', width: '100%' }}>
-      <div style={{ height: 4, background: 'linear-gradient(90deg, #0ea5e9, #8b5cf6)', opacity: 0.5 }}></div>
-      <div style={{ display: 'flex', flex: 1 }}>
-      <Sidebar user={user} page={page} onNavigate={setPage} onLogout={handleLogout} />
-      <main className="page-content" style={{ flex: 1, padding: '20px', backgroundColor: '#0c0d0d' }}>
-        <PageComponent user={user} onNavigate={setPage} />
-      </main>
-      </div>
-    </div>
-    </ErrorBoundary>
+    <QueryClientProvider client={queryClient}>
+      <ErrorBoundary>
+        <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', width: '100%' }}>
+          <div style={{ height: 4, background: 'linear-gradient(90deg, #0ea5e9, #8b5cf6)', opacity: 0.5 }}></div>
+          <div style={{ display: 'flex', flex: 1 }}>
+          <Sidebar user={user} page={page} onNavigate={setPage} onLogout={handleLogout} />
+          <main className="page-content" style={{ flex: 1, padding: '20px', backgroundColor: '#0c0d0d' }}>
+            <PageComponent user={user} onNavigate={setPage} />
+          </main>
+          </div>
+        </div>
+      </ErrorBoundary>
+    </QueryClientProvider>
   );
 }

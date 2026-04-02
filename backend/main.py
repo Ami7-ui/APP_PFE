@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
 import db_functions
+import ai_service
 import ollama
 import threading
 import time
@@ -212,14 +213,12 @@ def add_script(req: ScriptRequest):
 @app.post("/api/ai/ask")
 async def ask_ai(request: AIRequest):
     try:
-        system_message = "Tu es un expert en base de données Oracle (DBA Senior). Réponds en français de manière concise."
-        response = ollama.chat(model='llama3', messages=[
-            {'role': 'system', 'content': system_message},
-            {'role': 'user', 'content': f"Contexte : {request.context}\n\nRequête : {request.prompt}"}
-        ])
-        return {"reponse": response['message']['content']}
+        # Utilisation du service DBA expert
+        full_prompt = f"Contexte : {request.context}\n\nRequête : {request.prompt}"
+        response = ai_service.ask_dba_expert(full_prompt)
+        return {"reponse": response}
     except Exception as e:
-        return {"error": f"Erreur Ollama : {str(e)}"}
+        return {"error": f"Erreur Service IA : {str(e)}"}
 
 @app.post("/api/ai/analyze_sql")
 async def analyze_sql(req: AnalysisRequest):
@@ -227,12 +226,9 @@ async def analyze_sql(req: AnalysisRequest):
     if error: raise HTTPException(status_code=400, detail=f"Erreur Oracle: {error}")
 
     try:
-        prompt = f"Analyse ce SQL et son PLAN D'EXÉCUTION Oracle :\nSQL: {req.sql_query}\nPlan: {plan}"
-        response = ollama.chat(model='llama3', messages=[
-            {'role': 'system', 'content': 'Tu es un expert en performance Oracle.'},
-            {'role': 'user', 'content': prompt}
-        ])
-        return {"plan_brut": plan, "analyse_ia": response['message']['content']}
+        # Analyse de performance SQL structurée
+        analysis_result = ai_service.analyze_sql_performance(req.sql_query, plan)
+        return {"plan_brut": plan, "analyse_ia": analysis_result}
     except Exception as e:
         return {"error": str(e)}
 
@@ -242,13 +238,11 @@ async def analyze_audit(req: AuditAnalysisRequest):
     if not ok: raise HTTPException(status_code=503, detail=msg)
 
     try:
-        # Construction d'un résumé pour l'IA
-        context = f"CPU: {audit_data.get('cpu', {}).get('busy_pct')}% | RAM: {audit_data.get('ram', {}).get('ram_pct')}%"
-        response = ollama.chat(model='llama3', messages=[
-            {'role': 'system', 'content': 'Analyse la santé de cette base Oracle.'},
-            {'role': 'user', 'content': f"Données audit: {context}"}
-        ])
-        return {"rapport_ia": response['message']['content']}
+        # Utilisation du service IA dédié
+        analysis_result = ai_service.analyze_database_health(audit_data)
+        
+        # On retourne directement l'objet JSON formaté
+        return {"rapport_ia": analysis_result}
     except Exception as e:
         return {"error": str(e)}
 

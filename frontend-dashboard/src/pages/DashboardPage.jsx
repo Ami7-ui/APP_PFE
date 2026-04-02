@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import api from '../api';
 import GlassCard from '../components/GlassCard';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, Area, AreaChart,
   PieChart, Pie, Cell
 } from 'recharts';
-import { Activity, Server, Users, RefreshCw, PlugZap, Clock, Target, Database, Shield, Calendar } from 'lucide-react';
+import { Activity, Server, Users, RefreshCw, PlugZap, Clock, Target, Database, Shield, Calendar, Loader2 } from 'lucide-react';
 
 const KPI_OPTIONS = [
   { key: 'CPU',      label: 'Charge CPU',       unit: '%', color: '#0ea5e9', Icon: Activity },
@@ -101,74 +102,65 @@ function GaugeChart({ value, label, unit, color, maxValue = 100, displayValue })
 const STORAGE_KEY = 'og_dashboard_history';
 
 export default function DashboardPage() {
-  const [bases, setBases]       = useState([]);
   const [selected, setSelected] = useState([]);
   const [kpi, setKpi]           = useState('CPU');
-  const [status, setStatus]     = useState(null);
-  const [nodes, setNodes]       = useState([]);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError]       = useState('');
-  
-  // NOUVEAU : Le state pour le filtre de temps
   const [timeFilter, setTimeFilter] = useState('24h');
-  
-  const historyRef = useRef(
-    (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { return []; } })()
-  );
-  const [historyDisplay, setHistoryDisplay] = useState(historyRef.current);
+  const [error, setError]       = useState('');
 
-  useEffect(() => {
-    api.get('/api/bases').then(r => {
-      setBases(r.data);
-      if (r.data.length) setSelected([r.data[0].ID]);
-    }).catch(() => setError('Impossible de charger les bases. Serveur injoignable.'));
-  }, []);
+  // 1. Fetch des bases de données
+  const { data: bases = [], isLoading: isLoadingBases } = useQuery({
+    queryKey: ['bases'],
+    queryFn: async () => {
+      const { data } = await api.get('/api/bases');
+      if (data.length && selected.length === 0) setSelected([data[0].ID]);
+      return data;
+    }
+  });
 
-  const collect = async (ids) => {
-    if (!ids.length) return;
-    setRefreshing(true); setError('');
-    try {
+  // 2. Fetch des données du Dashboard (Status + Metrics)
+  const { 
+    data: dashboardData = { status: null, nodes: [], lastEntries: {} }, 
+    isFetching: isRefreshing, 
+    isLoading: isFirstLoading,
+    refetch: collect 
+  } = useQuery({
+    queryKey: ['dashboard', selected, timeFilter],
+    queryFn: async () => {
+      if (!selected.length) return { status: null, nodes: [], lastEntries: {} };
+      
+      const ids = selected;
+      const statusRes = await api.get(`/api/status/${ids[0]}`);
+      const status = statusRes.data;
+      
+      let nodes = [];
+      let lastEntries = {};
       const now = new Date();
-      const stRes = await api.get(`/api/status/${ids[0]}`);
-      setStatus(stRes.data);
 
       for (const id of ids) {
         const base = bases.find(b => b.ID === id);
         if (!base) continue;
         try {
-          // MODIFICATION : Envoi du filtre de temps à l'API FastAPI
           const { data } = await api.get(`/api/metrics/${id}?range=${timeFilter}`);
+          if (id === ids[0]) nodes = data.nodes || [];
           
-          if (id === ids[0]) setNodes(data.nodes || []);
-          const cpu  = data.cpu?.busy_pct ?? 0;
-          const ram  = data.ram?.ram_pct  ?? 0;
-          const sess = data.sessions?.ACTIVE ?? 0;
-          const blocked = data.sessions?.BLOCKED ?? 0;
-          const trans = data.sessions?.TOTAL_TRANSACTIONS ?? 0;
-
-          historyRef.current = [{ 
-            Heure: now.toISOString(), Nom_Base: base.Instance, 
-            CPU: cpu, RAM: ram, Sessions: sess,
-            Blocked: blocked, Transactions: trans 
-          }];
+          lastEntries[base.Instance] = {
+            Heure: now.toISOString(), 
+            Nom_Base: base.Instance, 
+            CPU: data.cpu?.busy_pct ?? 0, 
+            RAM: data.ram?.ram_pct ?? 0, 
+            Sessions: data.sessions?.ACTIVE ?? 0,
+            Blocked: data.sessions?.BLOCKED ?? 0, 
+            Transactions: data.sessions?.TOTAL_TRANSACTIONS ?? 0
+          };
         } catch { /* skip */ }
       }
-      
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(historyRef.current)); } catch { /* ignore */ }
-      setHistoryDisplay([...historyRef.current]);
-    } catch { setError('Erreur réseau lors de la collecte.'); }
-    finally { setRefreshing(false); }
-  };
+      return { status, nodes, lastEntries };
+    },
+    enabled: bases.length > 0 && selected.length > 0
+  });
 
-  // MODIFICATION : On relance la collecte si la base sélectionnée OU le filtre de temps change
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (bases.length && selected.length) collect(selected); }, [bases, timeFilter]);
-
+  const { status, nodes, lastEntries } = dashboardData;
   const selectedNames = selected.map(id => bases.find(b => b.ID === id)?.Instance).filter(Boolean);
-  const filteredHistory = historyDisplay.filter(h => selectedNames.includes(h.Nom_Base));
-
-  const lastEntries = {};
-  filteredHistory.forEach(h => { lastEntries[h.Nom_Base] = h; });
 
   return (
     <div>
@@ -181,28 +173,41 @@ export default function DashboardPage() {
       </div>
 
       {error && <div className="alert alert-error"><Shield size={18} /> {error}</div>}
-      <GlassCard style={{ marginBottom: 32, padding: '20px 24px' }}>
-        <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 250 }}>
-            <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Database size={14} /> Cibler les instances</label>
-            <select 
-              multiple 
-              value={selected.map(String)}
-              size={Math.max(2, bases.length)}
-              onChange={e => setSelected(Array.from(e.target.selectedOptions, o => parseInt(o.value)))}
-              style={{ width: '100%', borderRadius: 12, padding: '4px', background: 'rgba(15, 23, 42, 0.6)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', outline: 'none' }}>
-              {bases.map(b => (
-                <option key={b.ID} value={b.ID} style={{ padding: '10px 15px', borderRadius: 8, margin: '2px 0', cursor: 'pointer' }}>
-                  {b.Instance} — {b.IP} ({b.Type})
-                </option>
-              ))}
-            </select>
-          </div>
-          <button className="btn btn-primary" style={{ height: 50, padding: '0 32px' }} disabled={refreshing || !selected.length} onClick={() => collect(selected)}>
-            {refreshing ? <><RefreshCw size={18} className="spinner" /> SONDAGE EN COURS</> : <><RefreshCw size={18} /> FORCER L'ACTUALISATION</>}
-          </button>
+      
+      {isFirstLoading ? (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '50vh', gap: 20 }}>
+          <Loader2 size={48} color="#0ea5e9" className="spinner" />
+          <div style={{ fontSize: '1rem', color: '#94a3b8', fontWeight: 600, letterSpacing: '0.1em' }}>INITIALISATION DU DASHBOARD...</div>
         </div>
-      </GlassCard>
+      ) : (
+        <>
+          <GlassCard style={{ marginBottom: 32, padding: '20px 24px', opacity: isRefreshing ? 0.7 : 1, transition: 'opacity 0.3s' }}>
+            <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 250 }}>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Database size={14} /> Cibler les instances</label>
+                <select 
+                  multiple 
+                  value={selected.map(String)}
+                  size={Math.max(2, bases.length)}
+                  onChange={e => setSelected(Array.from(e.target.selectedOptions, o => parseInt(o.value)))}
+                  style={{ width: '100%', borderRadius: 12, padding: '4px', background: 'rgba(15, 23, 42, 0.6)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', outline: 'none' }}>
+                  {bases.map(b => (
+                    <option key={b.ID} value={b.ID} style={{ padding: '10px 15px', borderRadius: 8, margin: '2px 0', cursor: 'pointer' }}>
+                      {b.Instance} — {b.IP} ({b.Type})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button className="btn btn-primary" style={{ height: 50, padding: '0 32px' }} disabled={isRefreshing || !selected.length} onClick={() => collect()}>
+                {isRefreshing ? <><RefreshCw size={18} className="spinner" /> SONDAGE EN COURS</> : <><RefreshCw size={18} /> FORCER L'ACTUALISATION</>}
+              </button>
+            </div>
+            {isRefreshing && (
+              <div style={{ marginTop: 12, fontSize: '0.7rem', color: '#0ea5e9', fontWeight: 700, textAlign: 'right', animation: 'fadeIn 0.3s' }}>
+                <Loader2 size={12} className="spinner" style={{ display: 'inline', marginRight: 6 }} /> MISE À JOUR DU CACHE EN COURS...
+              </div>
+            )}
+          </GlassCard>
 
       <StatusBanner status={status} />
 
@@ -352,6 +357,8 @@ export default function DashboardPage() {
             </table>
           </div>
         </GlassCard>
+      )}
+      </>
       )}
     </div>
   );
