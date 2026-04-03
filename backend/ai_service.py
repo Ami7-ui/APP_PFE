@@ -1,5 +1,6 @@
 import json
 import ollama
+from openai import OpenAI
 
 def serialize_audit_data(audit_data: dict) -> str:
     """
@@ -57,70 +58,74 @@ def serialize_audit_data(audit_data: dict) -> str:
     return "\n".join(lines)
 
 
-def analyze_database_health(audit_data: dict) -> dict:
+def get_llama3_junior(context_data: str) -> str:
     """
-    Envoie le rapport au modèle LLaMA 3 avec des consignes DBA strictes et
-    retourne un dictionnaire (JSON) formaté.
+    Rôle 'Junior' : Analyse les métriques et identifie les anomalies sans donner de solutions.
     """
+    system_prompt = "Tu es un assistant DBA. Analyse ces métriques de base de données (Mémoire Partageable, Persistante, d'Exécution) et identifie de manière approfondie les anomalies et requêtes gourmandes. Ne donne pas de solutions, fais juste le constat."
     
-    # Sérialisation propre des données d'entrée
-    context_data = serialize_audit_data(audit_data)
-
-    # System Prompt très direct et impersonnel.
-    system_prompt = """Tu es un Administrateur de Base de Données (DBA) Senior. 
-Règles absolues :
-1. N'utilise AUCUNE formule de politesse (pas de bonjour, pas de conclusion, pas de texte d'introduction).
-2. Base-toi EXCLUSIVEMENT sur les composantes de l'audit système fournies (Version, Sessions, Requêtes SQL, CPU, RAM). Ne présume rien. N'invente rien.
-3. Formule un diagnostic complet, approfondi et purement factuel, et apporte des solutions techniques concrètes et adaptées.
-4. Tu DOIS répondre uniquement avec un objet JSON valide reprenant exactement la structure suivante :
-{
-  "diagnostic_approfondi": "Analyse détaillée et approfondie de l'état système (max 4 phrases).",
-  "anomalies_critiques": ["liste détaillée des dysfonctionnements graves constatés"],
-  "recommandations_techniques": [
-    {
-      "probleme": "Description du point à optimiser",
-      "solution_technique": "Action correctrice détaillée (ex: Code SQL, modification de paramètre interne)",
-      "impact_attendu": "Résultat technique espéré (ex: baisse de X% CPU)"
-    }
-  ]
-}"""
-
-    # User Prompt
-    user_prompt = f"Voici les données systèmes issues du dernier audit :\n\n{context_data}\n\nGénère l'analyse JSON associée."
-
     try:
-        # Appel à Ollama avec format forcé et température à 0.1
         response = ollama.chat(
             model='llama3',
             messages=[
                 {'role': 'system', 'content': system_prompt},
-                {'role': 'user', 'content': user_prompt}
+                {'role': 'user', 'content': context_data}
             ],
-            format='json',
-            options={
-                'temperature': 0.1
-            }
+            options={'temperature': 0.1}
         )
+        return response['message']['content']
+    except Exception as e:
+        raise Exception(f"Erreur Llama 3 (Junior) : {str(e)}")
+
+def get_nvidia_senior(diagnostic_text: str) -> str:
+    """
+    Rôle 'Senior' : Prend le diagnostic Junior et propose 3 solutions expertes.
+    """
+    client = OpenAI(
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key="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"
+    )
+    
+    try:
+        completion = client.chat.completions.create(
+            model="nvidia/nvidia-nemotron-nano-9b-v2",
+            messages=[
+                {"role": "system", "content": "Tu es un Administrateur de Base de Données Oracle Expert. Lis le diagnostic d'anomalies suivant et propose 3 solutions techniques précises, claires et concises sous forme de liste pour résoudre ces problèmes."},
+                {"role": "user", "content": diagnostic_text}
+            ],
+            temperature=0.2,
+            top_p=0.7,
+            max_tokens=1024,
+        )
+        return completion.choices[0].message.content
+    except Exception as e:
+        raise Exception(f"Erreur Nvidia API (Senior) : {str(e)}")
+
+def analyze_database_health(audit_data: dict) -> dict:
+    """
+    Orchestration Hybride Junior/Senior.
+    """
+    context_data = serialize_audit_data(audit_data)
+    
+    try:
+        # Étape 1 : Junior (Llama 3 Local)
+        diagnostic_local = get_llama3_junior(context_data)
         
-        raw_output = response['message']['content']
+        # Étape 2 : Senior (Nvidia Cloud)
+        solutions_expertes = get_nvidia_senior(diagnostic_local)
         
-        # Désérialiser la réponse renvoyée par LLaMA pour s'assurer qu'elle est exploitable en Python
-        try:
-            parsed_json = json.loads(raw_output)
-            return parsed_json
-        except json.JSONDecodeError:
-            # Sécurité au cas où le LLM ne respecte pas le JSON strict
-            return {
-                "diagnostic_approfondi": "Erreur lors du parsing JSON de la réponse de l'IA. Le LLM n'a pas renvoyé le bon format.",
-                "anomalies_critiques": ["Contenu non-JSON retourné par Ollama."],
-                "recommandations_techniques": []
-            }
-            
+        return {
+            "status": "success",
+            "diagnostic_local": diagnostic_local,
+            "solutions_expertes": solutions_expertes
+        }
+        
     except Exception as e:
         return {
-            "diagnostic_approfondi": f"Erreur de communication avec l'agent local Ollama : {str(e)}",
-            "anomalies_critiques": [],
-            "recommandations_techniques": []
+            "status": "error",
+            "message": str(e),
+            "diagnostic_local": "Échec de l'analyse.",
+            "solutions_expertes": "Indisponible."
         }
 
 def analyze_sql_performance(sql_query: str, explain_plan: str) -> dict:

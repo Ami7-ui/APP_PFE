@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import api from '../api';
 import { Bot, Zap, Search, Activity, Database, Sparkles, AlertCircle, CheckCircle, Terminal, AlertTriangle } from 'lucide-react';
 
@@ -17,53 +18,44 @@ const SectionTitle = ({ icon: Icon, title, color }) => (
   </h4>
 );
 
-function AnalysisRenderer({ rapport_ia, analyse_ia, reponse }) {
-  const content = rapport_ia || analyse_ia || reponse;
+function AnalysisRenderer({ rapport_ia, analyse_ia, reponse, status, diagnostic_local, solutions_expertes }) {
+  const content = rapport_ia || { status, diagnostic_local, solutions_expertes } || analyse_ia || reponse;
 
-  // Si le rapport est un objet (nouveau format JSON de ai_service)
-  if (typeof content === 'object' && content !== null) {
-    // Cas 1 : Analyse d'Audit (Rapport Global)
-    if (content.diagnostic_approfondi || content.interpretation_globale) {
-      const diagnostic = content.diagnostic_approfondi || content.interpretation_globale;
-      const { anomalies_critiques, recommandations_techniques } = content;
-      return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', animation: 'fadeIn 0.5s ease' }}>
-          <div style={{ ...cardStyle, borderLeft: '4px solid #8b5cf6', background: 'linear-gradient(90deg, rgba(139, 92, 246, 0.1), transparent)' }}>
-            <SectionTitle icon={Sparkles} title="Diagnostic Global Approfondi" color="#a78bfa" />
-            <p style={{ fontSize: '1.1rem', color: '#f1f5f9', lineHeight: '1.6', margin: 0 }}>{diagnostic}</p>
+  // Si c'est le nouveau format Hybride
+  if (content.status === 'success' || content.diagnostic_local) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', animation: 'fadeIn 0.5s ease' }}>
+        {/* Niveau 1 : Junior (Llama 3 Local) */}
+        <div style={{ ...cardStyle, borderLeft: '4px solid #3b82f6', background: 'linear-gradient(90deg, rgba(59, 130, 246, 0.1), transparent)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+            <SectionTitle icon={Bot} title="Audit Local (LLaMA 3 Junior)" color="#60a5fa" />
+            <span style={{ fontSize: '0.7rem', color: '#60a5fa', background: 'rgba(59, 130, 246, 0.1)', padding: '4px 10px', borderRadius: '12px', fontWeight: 700 }}>NIVEAU 1 : CONSTAT</span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 1fr) 2fr', gap: '24px' }}>
-            <div style={cardStyle}>
-              <SectionTitle icon={AlertCircle} title="Anomalies Détectées" color="#ef4444" />
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {anomalies_critiques?.map((anomaly, idx) => (
-                  <div key={idx} style={{ padding: '12px 16px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '12px', display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                    <AlertTriangle size={16} color="#f87171" style={{ marginTop: '2px', flexShrink: 0 }} />
-                    <span style={{ fontSize: '0.9rem', color: '#fecaca' }}>{anomaly}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              {recommandations_techniques?.map((rec, idx) => (
-                <div key={idx} style={{ ...cardStyle, border: '1px solid rgba(16, 185, 129, 0.1)', background: 'rgba(15, 23, 42, 0.6)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '15px' }}>
-                    <h5 style={{ margin: 0, color: '#10b981', fontSize: '1rem' }}>#{idx + 1} {rec.probleme}</h5>
-                    <div style={{ padding: '4px 10px', background: 'rgba(16, 185, 129, 0.1)', color: '#10b981', borderRadius: '20px', fontSize: '0.7rem', fontWeight: 700 }}>OPTIMISATION</div>
-                  </div>
-                  <pre style={{ padding: '16px', background: '#020617', borderRadius: '10px', color: '#38bdf8', fontSize: '0.85rem', fontFamily: "'Fira Code', monospace", overflowX: 'auto' }}>{rec.solution_technique}</pre>
-                  <div style={{ marginTop: '15px', display: 'flex', alignItems: 'center', gap: '10px', padding: '10px', background: 'rgba(14, 165, 233, 0.05)', borderRadius: '10px' }}>
-                    <CheckCircle size={14} color="#0ea5e9" /><span style={{ fontSize: '0.85rem', color: '#bae6fd' }}>{rec.impact_attendu}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
+          <div style={{ fontSize: '1rem', color: '#cbd5e1', lineHeight: '1.7', whiteSpace: 'pre-wrap' }}>
+            {content.diagnostic_local}
           </div>
         </div>
-      );
-    }
 
-    // Cas 2 : Analyse de Performance SQL
+        {/* Niveau 2 : Senior (Nvidia Expert) */}
+        <div style={{ ...cardStyle, borderLeft: '4px solid #10b981', background: 'linear-gradient(90deg, rgba(16, 185, 129, 0.1), transparent)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+            <SectionTitle icon={Zap} title="Solutions Expertes (Nvidia Senior)" color="#34d399" />
+            <span style={{ fontSize: '0.7rem', color: '#34d399', background: 'rgba(16, 185, 129, 0.1)', padding: '4px 10px', borderRadius: '12px', fontWeight: 700 }}>NIVEAU 2 : OPTIMISATION</span>
+          </div>
+          <div style={{ fontSize: '1.05rem', color: '#f1f5f9', lineHeight: '1.8', whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', padding: '20px', borderRadius: '12px', border: '1px solid rgba(16, 185, 129, 0.1)' }}>
+            {content.solutions_expertes}
+          </div>
+          <div style={{ marginTop: '15px', display: 'flex', alignItems: 'center', gap: '10px', color: '#64748b', fontSize: '0.8rem' }}>
+            <CheckCircle size={14} />
+            <span>Recommandations basées sur le moteur Nvidia Nemotron v2</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Fallback pour les anciens formats ou SQL local
+  if (typeof content === 'object' && content !== null) {
     if (content.analyse_plan) {
       const { points_critiques, analyse_plan, script_optimise, impact_performance } = content;
       return (
@@ -95,35 +87,8 @@ function AnalysisRenderer({ rapport_ia, analyse_ia, reponse }) {
         </div>
       );
     }
-
-    // Cas 3 : Questions générales DBA
-    if (content.reponse) {
-      const { reponse, details_techniques, actions_suggerees } = content;
-      return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', animation: 'fadeIn 0.5s ease' }}>
-          <div style={{ ...cardStyle, borderLeft: '4px solid #8b5cf6' }}>
-            <SectionTitle icon={Sparkles} title="Réponse de l'Expert DBA" color="#a78bfa" />
-            <p style={{ fontSize: '1.1rem', color: '#f1f5f9', fontWeight: 500 }}>{reponse}</p>
-            <div style={{ marginTop: '20px', padding: '15px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.05)', color: '#94a3b8', fontSize: '0.9rem' }}>
-              {details_techniques}
-            </div>
-          </div>
-          <div style={cardStyle}>
-            <SectionTitle icon={CheckCircle} title="Actions Suggérées" color="#10b981" />
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '12px' }}>
-              {actions_suggerees?.map((a, i) => (
-                <div key={i} style={{ padding: '12px', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.2)', color: '#a7f3d0', fontSize: '0.85rem' }}>
-                  {a}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      );
-    }
   }
 
-  // Fallback (Texte ou erreur)
   return (
     <div style={{ ...cardStyle, borderLeft: '4px solid #8b5cf6' }}>
       <SectionTitle icon={Sparkles} title="Expertise Technique" color="#a78bfa" />
@@ -135,11 +100,14 @@ function AnalysisRenderer({ rapport_ia, analyse_ia, reponse }) {
 }
 
 export default function AiAssistantPage() {
+  const queryClient = useQueryClient();
   const [sqlToAnalyze, setSqlToAnalyze] = useState("");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [bases, setBases] = useState([]);
   const [selectedBase, setSelectedBase] = useState("");
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   useEffect(() => {
     const fetchBasesAndCheckAudit = async () => {
@@ -168,6 +136,8 @@ export default function AiAssistantPage() {
             id_base: parseInt(id_base)
           });
           setResult(res.data);
+          // Invalidation de l'historique des rapports pour forcer la mise à jour
+          queryClient.invalidateQueries({ queryKey: ['reports'] });
         } catch {
           alert("Erreur lors de l'analyse IA de l'audit.");
         } finally {
@@ -194,6 +164,24 @@ export default function AiAssistantPage() {
       alert("Erreur lors de l'analyse : vérifiez que la route /api/ai/analyze_sql existe dans le backend.");
     } finally {
       setLoading(false);
+      setSaveSuccess(false);
+    }
+  };
+
+  const handleSaveReport = async () => {
+    if (!selectedBase || !result) return;
+    setSaveLoading(true);
+    try {
+      await api.post('/api/reports/save', {
+        id_base: parseInt(selectedBase),
+        ai_result: result
+      });
+      setSaveSuccess(true);
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
+    } catch {
+      alert("Erreur lors de la sauvegarde du rapport.");
+    } finally {
+      setSaveLoading(false);
     }
   };
 
@@ -280,6 +268,32 @@ export default function AiAssistantPage() {
           )}
           {loading ? "L'IA analyse le plan d'exécution..." : "Lancer l'Expertise IA Tactique"}
         </button>
+
+        {/* Bouton de sauvegarde (affiché après analyse) */}
+        {result && !loading && (
+          <div style={{ marginTop: '20px', display: 'flex', alignItems: 'center', gap: '15px', animation: 'slideUp 0.3s' }}>
+            <button 
+              onClick={handleSaveReport}
+              disabled={saveLoading}
+              style={{ 
+                background: saveSuccess ? '#059669' : 'rgba(16, 185, 129, 0.1)', 
+                color: saveSuccess ? 'white' : '#10b981', 
+                padding: '12px 24px', border: saveSuccess ? 'none' : '1px solid #10b981', 
+                borderRadius: '10px', cursor: 'pointer', 
+                display: 'flex', alignItems: 'center', gap: '10px',
+                fontWeight: 700, transition: 'all 0.3s ease'
+              }}
+            >
+              {saveLoading ? <Activity className="animate-spin" size={18} /> : <CheckCircle size={18} />}
+              {saveSuccess ? "Rapport Archivé avec Succès" : "Générer & Sauvegarder le Rapport PDF"}
+            </button>
+            {saveSuccess && (
+              <span style={{ fontSize: '0.85rem', color: '#94a3b8' }}>
+                Retrouvez ce document dans l'onglet <strong>Historique</strong>.
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Résultats */}

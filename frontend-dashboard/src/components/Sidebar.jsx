@@ -1,6 +1,6 @@
 import React from 'react';
 // NOUVEAU : Ajout de l'icône Bot pour l'IA
-import { LayoutDashboard, ShieldCheck, Settings, Database, Code, Users, LogOut, Shield, Bot } from 'lucide-react'; 
+import { LayoutDashboard, ShieldCheck, Settings, Database, Code, Users, LogOut, Shield, Bot, FileText } from 'lucide-react'; 
 
 const ROLE_COLORS = {
   super_admin: '#ef4444', admin: '#f59e0b', consultant: '#0ea5e9', dba: '#10b981'
@@ -18,6 +18,7 @@ const NAV_ITEMS = [
   { key: 'users',          label: 'Contrôle Accès',         Icon: Users,           roles: ['super_admin'] },
   // NOUVEAU : Le bouton Assistant IA
   { key: 'assistant_ia',   label: 'Assistant IA',           Icon: Bot,             roles: ['super_admin','admin','consultant','dba'] }, 
+  { key: 'reports_history', label: 'Historique Rapports',    Icon: FileText,        roles: ['super_admin','admin','consultant','dba'] },
 ];
 
 export default function Sidebar({ user, page, onNavigate, onLogout }) {

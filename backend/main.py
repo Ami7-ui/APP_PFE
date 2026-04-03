@@ -1,6 +1,8 @@
 # backend/main.py
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, List
 import db_functions
@@ -71,6 +73,10 @@ class AnalysisRequest(BaseModel):
 
 class AuditAnalysisRequest(BaseModel):
     id_base: int
+
+class ReportSaveRequest(BaseModel):
+    id_base: int
+    ai_result: dict
 
 # ── COLLECTEUR AUTOMATIQUE (BACKGROUND TASK) ──────────────────────────────────
 # ── ROUTES AUTHENTIFICATION ───────────────────────────────────────────────────
@@ -246,7 +252,43 @@ async def analyze_audit(req: AuditAnalysisRequest):
     except Exception as e:
         return {"error": str(e)}
 
+@app.get("/api/reports")
+def get_reports(nom_base: str = Query(..., alias="nom_base_cible")):
+    """ Route pour récupérer l'historique des PDFs par base cible """
+    return db_functions.get_reports_history(nom_base)
+
+@app.post("/api/reports/save")
+async def save_report(req: ReportSaveRequest):
+    """ Génère et enregistre un rapport PDF """
+    ok, msg = db_functions.save_audit_report(req.id_base, req.ai_result)
+    if not ok: raise HTTPException(status_code=500, detail=msg)
+    return {"message": msg}
+
+@app.delete("/api/reports/{id_audit}")
+async def delete_report(id_audit: int):
+    """ Supprime un rapport de l'historique """
+    ok, msg = db_functions.delete_audit_report(id_audit)
+    if not ok: raise HTTPException(status_code=400, detail=msg)
+    return {"message": msg}
+
+@app.get("/api/reports/{id_audit}/download")
+async def download_report(id_audit: int):
+    """ Récupère le PDF depuis le BLOB Oracle et le renvoie au navigateur """
+    blob_data, err = db_functions.get_report_blob(id_audit)
+    if err: raise HTTPException(status_code=404, detail=err)
+    
+    return Response(
+        content=blob_data,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=rapport_audit_{id_audit}.pdf"
+        }
+    )
+
+# Suppression du service de fichiers statiques local (on utilise la BD maintenant)
+
 # ── DÉMARRAGE ──────────────────────────────────────────────────────────────────
+
 
 if __name__ == "__main__":
     import uvicorn

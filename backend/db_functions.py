@@ -1,10 +1,16 @@
 # backend/db_functions.py
 import oracledb # type: ignore
-import mysql.connector
+try:
+    import mysql.connector
+except ImportError:
+    mysql = None
 import re
 import pandas as pd # type: ignore
 import requests # type: ignore
 import datetime
+import os
+import io
+from fpdf import FPDF
 from oracle_db import get_oracle_connection # type: ignore
 
 # ==========================================
@@ -205,6 +211,8 @@ def get_db_connection(id_base):
             conn_cible = oracledb.connect(user=user, password=mdp, dsn=dsn)
             return conn_cible, "ORACLE", None
         elif 'MYSQL' in type_upper:
+            if not mysql:
+                return None, None, "Le module 'mysql-connector-python' n'est pas installé sur le serveur."
             conn_cible = mysql.connector.connect(host=ip, port=port, user=user, password=mdp, database="mysql")
             return conn_cible, "MYSQL", None
         else:
@@ -644,3 +652,193 @@ def get_history_from_oracle(id_base, time_range="24h"):
         return []
     finally:
         if 'conn' in locals(): conn.close()
+
+# ==========================================
+# 7. HISTORIQUE DES RAPPORTS PDF
+# ==========================================
+
+def get_reports_history(nom_base_cible):
+    """
+    Récupère la liste des métadonnées des rapports PDF pour une base cible donnée.
+    Renvoie uniquement id_audit, date_generation et nom_base_cible.
+    """
+    conn = get_oracle_connection()
+    if not conn: return []
+    try:
+        cursor = conn.cursor()
+        sql = """
+            SELECT id_audit, date_generation, nom_base_cible 
+            FROM historiques_audits 
+            WHERE UPPER(nom_base_cible) = UPPER(:1)
+            ORDER BY date_generation DESC
+        """
+        cursor.execute(sql, (nom_base_cible,))
+        reports = []
+        for r in cursor.fetchall():
+            try:
+                date_val = r[1]
+                date_str = date_val.isoformat() if hasattr(date_val, 'isoformat') else str(date_val)
+            except Exception:
+                date_str = "Date inconnue"
+            reports.append({
+                "id": r[0],
+                "date": date_str,
+                "base": r[2]
+            })
+        return reports
+    except Exception as e:
+        print(f"[DEBUG] Erreur historique rapports : {e}")
+        return []
+    finally:
+        if 'conn' in locals() and conn: conn.close()
+
+# ==========================================
+# 8. GÉNÉRATION DE RAPPORTS PDF (BLOB)
+# ==========================================
+
+class AuditPDF(FPDF):
+    def header(self):
+        # En-tête stylisé
+        self.set_fill_color(15, 23, 42)
+        self.rect(0, 0, 210, 40, 'F')
+        self.set_font('helvetica', 'B', 24)
+        self.set_text_color(56, 189, 248)
+        self.cell(0, 20, 'ORACLEGUARD - RAPPORT D\'AUDIT', 0, 1, 'C')
+        self.set_font('helvetica', 'I', 10)
+        self.set_text_color(148, 163, 184)
+        self.cell(0, 5, f'Généré le {datetime.datetime.now().strftime("%d/%m/%Y à %H:%M")}', 0, 1, 'C')
+        self.ln(15)
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font('helvetica', 'I', 8)
+        self.set_text_color(148, 163, 184)
+        self.cell(0, 10, f'Page {self.page_no()}/{{nb}} - OracleGuard Intelligent Monitoring', 0, 0, 'C')
+
+    def chapter_title(self, title):
+        self.set_font('helvetica', 'B', 16)
+        self.set_text_color(30, 41, 59)
+        self.set_fill_color(241, 245, 249)
+        self.cell(0, 10, f"  {title}", 0, 1, 'L', True)
+        self.ln(5)
+
+    def chapter_body(self, body):
+        self.set_font('helvetica', '', 11)
+        self.set_text_color(51, 65, 85)
+        self.multi_cell(0, 7, body)
+        self.ln(5)
+
+def save_audit_report(id_base, ai_analysis_result):
+    """
+    Génère un PDF en mémoire (BytesIO) et l'insère dans la colonne BLOB 'fichier_pdf'.
+    """
+    # 1. Récupérer les données fraîches de l'audit
+    ok, msg, audit_data = executer_audit_basique(id_base)
+    if not ok: return False, f"Échec extraction données : {msg}"
+    
+    # Récupérer le nom humain de la base
+    creds = get_target_credentials(id_base)
+    nom_base = creds[4] if creds else f"Base_{id_base}"
+    if not nom_base: nom_base = f"Base_{id_base}"
+    
+    # 2. Préparer la structure du PDF
+    pdf = AuditPDF()
+    pdf.alias_nb_pages()
+    pdf.add_page()
+    
+    # Section : Infos Instance
+    pdf.chapter_title("1. Informations de l'Instance")
+    version_txt = "\n".join(audit_data.get('version', []))
+    pdf.chapter_body(f"Base de données : {nom_base}\n\nVersion et Patchs :\n{version_txt}")
+    
+    # Section : Performance
+    pdf.chapter_title("2. Performance Système")
+    cpu = audit_data.get('cpu', {})
+    ram = audit_data.get('ram', {})
+    perf_txt = f"Utilisation CPU : {cpu.get('busy_pct', 0)}%\n"
+    perf_txt += f"Utilisation RAM : {ram.get('ram_pct', 0)}% (SGA: {ram.get('sga_total_mb', 0)}Mo / PGA: {ram.get('pga_total_mb', 0)}Mo)\n"
+    pdf.chapter_body(perf_txt)
+    
+    # Section : SQL Top
+    pdf.chapter_title("3. Diagnostic SQL (Top 10)")
+    sql_list = audit_data.get('sql', [])
+    if sql_list:
+        pdf.set_font('helvetica', 'B', 10)
+        pdf.cell(40, 7, 'SQL_ID', 1); pdf.cell(100, 7, 'Extrait', 1); pdf.cell(40, 7, 'Exécutions', 1); pdf.ln()
+        pdf.set_font('helvetica', '', 9)
+        for s in sql_list:
+            pdf.cell(40, 7, str(s['SQL_ID']), 1)
+            pdf.cell(100, 7, s['SQL_TEXT'][:50] + "...", 1)
+            pdf.cell(40, 7, str(s['EXECUTIONS']), 1)
+            pdf.ln()
+    else:
+        pdf.chapter_body("Aucune donnée SQL disponible.")
+
+    # Section : Audit IA
+    pdf.add_page()
+    pdf.chapter_title("4. Expertise IA (Llama 3 & Nvidia SDK)")
+    ai_content = ai_analysis_result.get('rapport_ia', ai_analysis_result)
+    
+    if isinstance(ai_content, dict):
+        diag = ai_content.get('diagnostic_local', "N/A")
+        sol = ai_content.get('solutions_expertes', "N/A")
+        pdf.set_font('helvetica', 'B', 12)
+        pdf.set_text_color(59, 130, 246); pdf.cell(0, 10, "Constat Junior (LLaMA) :", 0, 1)
+        pdf.chapter_body(diag)
+        pdf.ln(2)
+        pdf.set_font('helvetica', 'B', 12)
+        pdf.set_text_color(16, 185, 129); pdf.cell(0, 10, "Optimisation Senior (Nvidia) :", 0, 1)
+        pdf.chapter_body(sol)
+    else:
+        pdf.chapter_body(str(ai_content))
+
+    # Génération binaire spécifique pour fpdf 1.7.2
+    pdf_string = pdf.output(dest='S')
+    pdf_bytes = pdf_string.encode('latin-1')
+
+    # 4. Insertion Oracle BLOB
+    conn = get_oracle_connection()
+    try:
+        cursor = conn.cursor()
+        # Déclaration explicite du type BLOB pour garantir le stockage
+        cursor.setinputsizes(None, oracledb.DB_TYPE_BLOB)
+        sql_insert = "INSERT INTO historiques_audits (date_generation, nom_base_cible, fichier_pdf) VALUES (CURRENT_TIMESTAMP, :1, :2)"
+        cursor.execute(sql_insert, [nom_base, pdf_bytes])
+        print(f"[DEBUG] Taille du PDF généré : {len(pdf_bytes)} octets")
+        conn.commit()
+        return True, "Rapport archivé avec succès en base de données (BLOB)."
+    except Exception as e:
+        print(f"[ERROR] Échec insertion BLOB : {e}")
+        return False, f"Erreur lors de l'archivage BLOB : {e}"
+    finally:
+        if 'conn' in locals() and conn: conn.close()
+
+def get_report_blob(id_audit):
+    """
+    Récupère le contenu BLOB d'un rapport PDF spécifique.
+    """
+    conn = get_oracle_connection()
+    if not conn: return None, "Connexion BD impossible"
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT fichier_pdf FROM historiques_audits WHERE id_audit = :1", (id_audit,))
+        row = cursor.fetchone()
+        if not row: return None, "Document introuvable"
+        return row[0].read() if hasattr(row[0], 'read') else row[0], None
+    except Exception as e:
+        return None, f"Erreur lecture BLOB : {e}"
+    finally:
+        if 'conn' in locals() and conn: conn.close()
+
+def delete_audit_report(id_audit):
+    """ Supprime un rapport archivé de la base de données. """
+    conn = get_oracle_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM historiques_audits WHERE id_audit = :1", (id_audit,))
+        conn.commit()
+        return True, "Rapport supprimé avec succès."
+    except Exception as e:
+        return False, str(e)
+    finally:
+        if 'conn' in locals() and conn: conn.close()

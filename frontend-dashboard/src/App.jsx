@@ -10,6 +10,7 @@ import CiblesPage from './pages/CiblesPage';
 import ScriptsPage from './pages/ScriptsPage';
 import UsersPage from './pages/UsersPage';
 import AiAssistantPage from './pages/AiAssistantPage'; 
+import ReportsHistoryPage from './pages/ReportsHistoryPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -54,6 +55,7 @@ const PAGE_COMPONENTS = {
   scripts:       ScriptsPage,
   users:         UsersPage,
   assistant_ia:  AiAssistantPage,
+  reports_history: ReportsHistoryPage,
 };
 
 export default function App() {
