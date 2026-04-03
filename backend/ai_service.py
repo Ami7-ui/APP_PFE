@@ -95,7 +95,7 @@ def get_nvidia_senior(diagnostic_text: str) -> str:
             ],
             temperature=0.2,
             top_p=0.7,
-            max_tokens=1024,
+            max_tokens=4096,
         )
         return completion.choices[0].message.content
     except Exception as e:
