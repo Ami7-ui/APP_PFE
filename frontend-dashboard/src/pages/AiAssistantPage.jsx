@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import api from '../api';
 import { Bot, Zap, Search, Activity, Database, Sparkles, AlertCircle, CheckCircle, Terminal, AlertTriangle } from 'lucide-react';
+import AiResponseViewer from '../components/AiResponseViewer';
 
 const cardStyle = {
   background: 'rgba(30, 41, 59, 0.4)',
@@ -31,8 +32,8 @@ function AnalysisRenderer({ rapport_ia, analyse_ia, reponse, status, diagnostic_
             <SectionTitle icon={Bot} title="Audit Local (LLaMA 3 Junior)" color="#60a5fa" />
             <span style={{ fontSize: '0.7rem', color: '#60a5fa', background: 'rgba(59, 130, 246, 0.1)', padding: '4px 10px', borderRadius: '12px', fontWeight: 700 }}>NIVEAU 1 : CONSTAT</span>
           </div>
-          <div style={{ fontSize: '1rem', color: '#cbd5e1', lineHeight: '1.7', whiteSpace: 'pre-wrap' }}>
-            {content.diagnostic_local}
+          <div style={{ fontSize: '1rem', color: '#cbd5e1', lineHeight: '1.7' }}>
+            <AiResponseViewer content={content.diagnostic_local} />
           </div>
         </div>
 
@@ -42,8 +43,8 @@ function AnalysisRenderer({ rapport_ia, analyse_ia, reponse, status, diagnostic_
             <SectionTitle icon={Zap} title="Solutions Expertes (Nvidia Senior)" color="#34d399" />
             <span style={{ fontSize: '0.7rem', color: '#34d399', background: 'rgba(16, 185, 129, 0.1)', padding: '4px 10px', borderRadius: '12px', fontWeight: 700 }}>NIVEAU 2 : OPTIMISATION</span>
           </div>
-          <div style={{ fontSize: '1.05rem', color: '#f1f5f9', lineHeight: '1.8', whiteSpace: 'pre-wrap', background: 'rgba(0,0,0,0.2)', padding: '20px', borderRadius: '12px', border: '1px solid rgba(16, 185, 129, 0.1)' }}>
-            {content.solutions_expertes}
+          <div style={{ fontSize: '1.05rem', color: '#f1f5f9', lineHeight: '1.8', background: 'rgba(0,0,0,0.2)', padding: '20px', borderRadius: '12px', border: '1px solid rgba(16, 185, 129, 0.1)' }}>
+            <AiResponseViewer content={content.solutions_expertes} />
           </div>
           <div style={{ marginTop: '15px', display: 'flex', alignItems: 'center', gap: '10px', color: '#64748b', fontSize: '0.8rem' }}>
             <CheckCircle size={14} />
@@ -92,8 +93,8 @@ function AnalysisRenderer({ rapport_ia, analyse_ia, reponse, status, diagnostic_
   return (
     <div style={{ ...cardStyle, borderLeft: '4px solid #8b5cf6' }}>
       <SectionTitle icon={Sparkles} title="Expertise Technique" color="#a78bfa" />
-      <div style={{ fontSize: '0.95rem', lineHeight: '1.7', color: '#cbd5e1', whiteSpace: 'pre-wrap' }}>
-        {typeof content === 'string' ? content : JSON.stringify(content, null, 2)}
+      <div style={{ fontSize: '0.95rem', lineHeight: '1.7', color: '#cbd5e1' }}>
+        <AiResponseViewer content={typeof content === 'string' ? content : JSON.stringify(content, null, 2)} />
       </div>
     </div>
   );

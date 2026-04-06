@@ -186,6 +186,15 @@ def run_audit(id_base: int):
     if not ok: raise HTTPException(status_code=503, detail=msg)
     return {"message": msg, "data": data}
 
+@app.get("/api/audit/full/{id_base}")
+def run_full_audit(id_base: int):
+    """
+    Route pour l'audit complet (6 catégories) avec métriques détaillées.
+    """
+    ok, msg, data = db_functions.executer_audit_complet(id_base)
+    if not ok: raise HTTPException(status_code=503, detail=msg)
+    return {"message": msg, "data": data}
+
 @app.post("/api/execute_script/{id_base}")
 def execute_sql(id_base: int, req: SqlRequest):
     data, error = db_functions.executer_script_sur_cible(id_base, req.script)
@@ -240,11 +249,11 @@ async def analyze_sql(req: AnalysisRequest):
 
 @app.post("/api/ai/analyze_audit")
 async def analyze_audit(req: AuditAnalysisRequest):
-    ok, msg, audit_data = db_functions.executer_audit_basique(req.id_base)
+    ok, msg, audit_data = db_functions.executer_audit_complet(req.id_base)
     if not ok: raise HTTPException(status_code=503, detail=msg)
 
     try:
-        # Utilisation du service IA dédié
+        # Utilisation du service IA dédié pour les 6 catégories
         analysis_result = ai_service.analyze_database_health(audit_data)
         
         # On retourne directement l'objet JSON formaté

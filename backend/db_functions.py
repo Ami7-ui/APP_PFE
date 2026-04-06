@@ -723,23 +723,137 @@ class AuditPDF(FPDF):
         self.ln(5)
 
     def chapter_body(self, body):
-        self.set_font('helvetica', '', 11)
-        self.set_text_color(51, 65, 85)
-        self.multi_cell(0, 7, body)
+        # 1. Nettoyage des emojis (FPDF ne supporte pas l'UTF-8 étendu nativement)
+        body = body.encode('latin-1', 'ignore').decode('latin-1')
+        
+        # 2. Parsing du Markdown pour les blocs SQL (```sql ... ```)
+        parts = re.split(r'```(?:sql)?\s*([\s\S]*?)```', body)
+        for i, part in enumerate(parts):
+            if i % 2 == 1:
+                # Bloc de code
+                self.set_font('Courier', '', 10)
+                self.set_text_color(220, 38, 38) # Rouge
+                self.set_fill_color(248, 250, 252)
+                self.multi_cell(0, 7, part, border=1, fill=True)
+            else:
+                # Texte normal
+                self.set_font('helvetica', '', 11)
+                self.set_text_color(51, 65, 85)
+                self.multi_cell(0, 7, part)
         self.ln(5)
+
+def executer_audit_complet(id_base):
+    """
+    Récupère l'intégralité des métriques pour les 6 catégories du dashboard.
+    """
+    conn, db_type, err = get_db_connection(id_base)
+    if err or not conn:
+        return False, f"Inaccessible : {err}", None
+        
+    try:
+        cursor = conn.cursor()
+        
+        # 1. PERFORMANCE
+        performance = {"cpu": 0, "ram": 0, "iops": []}
+        try:
+            # CPU/RAM existants
+            perf_cpu = get_cpu_stats(id_base)
+            perf_ram = get_ram_stats(id_base)
+            performance["cpu"] = perf_cpu if perf_cpu else {}
+            performance["ram"] = perf_ram if perf_ram else {}
+            
+            # IOPS via v$sysmetric
+            cursor.execute("SELECT METRIC_NAME, ROUND(VALUE,2) FROM v$sysmetric WHERE METRIC_NAME IN ('Physical Reads Per Sec', 'Physical Writes Per Sec') AND GROUP_ID = 2")
+            iops_data = {row[0]: row[1] for row in cursor.fetchall()}
+            performance["iops_reads"] = iops_data.get('Physical Reads Per Sec', 0)
+            performance["iops_writes"] = iops_data.get('Physical Writes Per Sec', 0)
+        except: performance["error"] = "Performance partial fail"
+
+        # 2. STOCKAGE
+        storage = {}
+        try:
+            cursor.execute("SELECT ROUND(SUM(BYTES)/1024/1024/1024, 2) FROM dba_data_files")
+            storage["total_gb"] = cursor.fetchone()[0] or 0
+            
+            cursor.execute("SELECT ROUND(SUM(BYTES)/1024/1024/1024, 2) FROM dba_free_space")
+            storage["free_gb"] = cursor.fetchone()[0] or 0
+            
+            cursor.execute("SELECT segment_type, ROUND(SUM(bytes)/1024/1024, 2) FROM dba_segments GROUP BY segment_type")
+            storage["segments"] = [{"type": r[0], "mb": r[1]} for r in cursor.fetchall()]
+            
+            storage["compression_ratio"] = 42.5 # Mock as requested
+            storage["growth_data"] = [12, 15, 10, 22, 18, 5, 8] # Mock 7 days
+        except: storage["error"] = "Storage fail (Check DBA privileges)"
+
+        # 3. REQUÊTES
+        queries = {}
+        try:
+            cursor.execute("SELECT ROUND(VALUE, 2) FROM v$sysmetric WHERE METRIC_NAME = 'Buffer Cache Hit Ratio' AND GROUP_ID = 2")
+            queries["cache_hit_ratio"] = cursor.fetchone()[0] or 0
+            
+            cursor.execute("""
+                SELECT SQL_ID, ROUND(ELAPSED_TIME/1000000, 2), SUBSTR(SQL_TEXT,1,100) 
+                FROM (SELECT * FROM v$sql ORDER BY ELAPSED_TIME DESC) 
+                WHERE ROWNUM <= 5
+            """)
+            queries["slow_queries"] = [{"sql_id": r[0], "elapsed": r[1], "text": r[2]} for r in cursor.fetchall()]
+        except: queries["error"] = "Queries fail"
+
+        # 4. CONNEXIONS
+        connections = {}
+        try:
+            cursor.execute("SELECT STATUS, COUNT(*) FROM v$session GROUP BY STATUS")
+            connections["status"] = {row[0]: row[1] for row in cursor.fetchall()}
+            
+            cursor.execute("SELECT VALUE FROM v$sysstat WHERE NAME = 'logons (failed)'")
+            connections["failed_logons"] = cursor.fetchone()[0] or 0
+        except: connections["error"] = "Connections fail"
+
+        # 5. RÉPLICATION / HA
+        replication = {"status": "UNKNOWN"}
+        try:
+            cursor.execute("SELECT NAME, VALUE, UNIT FROM v$dataguard_stats")
+            rows = cursor.fetchall()
+            if rows:
+                replication["status"] = "ACTIVE"
+                replication["stats"] = [{"name": r[0], "value": r[1], "unit": r[2]} for r in rows]
+            else:
+                replication["status"] = "NOT_CONFIGURED"
+        except: replication["status"] = "NOT_AVAILABLE"
+
+        # 6. MÉTRIQUES MÉTIER
+        business = {}
+        try:
+            # Placeholder queries
+            business["active_users"] = 125 # Mock
+            business["daily_transactions"] = 4500 # Mock
+        except: business["error"] = "Business fail"
+
+        conn.close()
+        return True, "Collecte complète terminée", {
+            "performance": performance,
+            "storage": storage,
+            "queries": queries,
+            "connections": connections,
+            "replication": replication,
+            "business": business
+        }
+    except Exception as e:
+        if conn: conn.close()
+        return False, str(e), None
 
 def save_audit_report(id_base, ai_analysis_result):
     """
     Génère un PDF en mémoire (BytesIO) et l'insère dans la colonne BLOB 'fichier_pdf'.
+    Utilise les 6 catégories pour un audit exhaustif.
     """
-    # 1. Récupérer les données fraîches de l'audit
-    ok, msg, audit_data = executer_audit_basique(id_base)
+    # 1. Récupérer les données complètes de l'audit (6 catégories)
+    ok, msg, audit_data = executer_audit_complet(id_base)
     if not ok: return False, f"Échec extraction données : {msg}"
     
     # Récupérer le nom humain de la base
     creds = get_target_credentials(id_base)
     nom_base = creds[4] if creds else f"Base_{id_base}"
-    if not nom_base: nom_base = f"Base_{id_base}"
     
     # 2. Préparer la structure du PDF
     pdf = AuditPDF()
@@ -748,49 +862,43 @@ def save_audit_report(id_base, ai_analysis_result):
     
     # Section : Infos Instance
     pdf.chapter_title("1. Informations de l'Instance")
-    version_txt = "\n".join(audit_data.get('version', []))
-    pdf.chapter_body(f"Base de données : {nom_base}\n\nVersion et Patchs :\n{version_txt}")
+    version_txt = f"Base de données : {nom_base}\n"
+    pdf.chapter_body(version_txt)
     
-    # Section : Performance
-    pdf.chapter_title("2. Performance Système")
-    cpu = audit_data.get('cpu', {})
-    ram = audit_data.get('ram', {})
-    perf_txt = f"Utilisation CPU : {cpu.get('busy_pct', 0)}%\n"
-    perf_txt += f"Utilisation RAM : {ram.get('ram_pct', 0)}% (SGA: {ram.get('sga_total_mb', 0)}Mo / PGA: {ram.get('pga_total_mb', 0)}Mo)\n"
+    # Section : Performance (Extraction depuis le format dict complet)
+    pdf.chapter_title("2. Performance & Ressources (Synthèse)")
+    perf = audit_data.get('performance', {})
+    cpu = perf.get('cpu', {}).get('busy_pct', 0)
+    ram = perf.get('ram', {}).get('ram_pct', 0)
+    perf_txt = f"Utilisation CPU : {cpu}%\n"
+    perf_txt += f"Utilisation RAM : {ram}%\n"
+    perf_txt += f"IOPS Lecture : {perf.get('iops_reads', 0)} | IOPS Écriture : {perf.get('iops_writes', 0)}"
     pdf.chapter_body(perf_txt)
     
-    # Section : SQL Top
-    pdf.chapter_title("3. Diagnostic SQL (Top 10)")
-    sql_list = audit_data.get('sql', [])
-    if sql_list:
-        pdf.set_font('helvetica', 'B', 10)
-        pdf.cell(40, 7, 'SQL_ID', 1); pdf.cell(100, 7, 'Extrait', 1); pdf.cell(40, 7, 'Exécutions', 1); pdf.ln()
-        pdf.set_font('helvetica', '', 9)
-        for s in sql_list:
-            pdf.cell(40, 7, str(s['SQL_ID']), 1)
-            pdf.cell(100, 7, s['SQL_TEXT'][:50] + "...", 1)
-            pdf.cell(40, 7, str(s['EXECUTIONS']), 1)
-            pdf.ln()
-    else:
-        pdf.chapter_body("Aucune donnée SQL disponible.")
+    # Section : Stockage & Requêtes (Bref aperçu avant l'IA)
+    pdf.chapter_title("3. Métriques Critiques (Stockage & Sessions)")
+    storage = audit_data.get('storage', {})
+    conn_data = audit_data.get('connections', {})
+    synth_txt = f"Espace total : {storage.get('total_gb', 0)} Go | Libre : {storage.get('free_gb', 0)} Go\n"
+    synth_txt += f"Sessions : {conn_data.get('status', {}).get('ACTIVE', 0)} actives / {sum(conn_data.get('status', {}).values()) if isinstance(conn_data.get('status'), dict) else 0} totales\n"
+    pdf.chapter_body(synth_txt)
 
     # Section : Audit IA
     pdf.add_page()
-    pdf.chapter_title("4. Expertise IA (Llama 3 & Nvidia SDK)")
+    pdf.chapter_title("4. Expertise IA (Diagnostic & Optimisation)")
     ai_content = ai_analysis_result.get('rapport_ia', ai_analysis_result)
     
-    if isinstance(ai_content, dict):
+    if isinstance(ai_content, dict) and 'texte_final' in ai_content:
+        # Nouveau pipeline : Texte Final Unifié
+        pdf.chapter_body(ai_content['texte_final'])
+    elif isinstance(ai_content, dict):
+        # Fallback ancienne structure
         diag = ai_content.get('diagnostic_local', "N/A")
         sol = ai_content.get('solutions_expertes', "N/A")
-        pdf.set_font('helvetica', 'B', 12)
-        pdf.set_text_color(59, 130, 246); pdf.cell(0, 10, "Constat Junior (LLaMA) :", 0, 1)
-        pdf.chapter_body(diag)
-        pdf.ln(2)
-        pdf.set_font('helvetica', 'B', 12)
-        pdf.set_text_color(16, 185, 129); pdf.cell(0, 10, "Optimisation Senior (Nvidia) :", 0, 1)
-        pdf.chapter_body(sol)
+        pdf.chapter_body(f"### 🧪 DIAGNOSTIC LOCAL\n{diag}\n\n### 🚀 SOLUTIONS EXPERTES\n{sol}")
     else:
         pdf.chapter_body(str(ai_content))
+
 
     # Génération binaire spécifique pour fpdf 1.7.2
     pdf_string = pdf.output(dest='S')
