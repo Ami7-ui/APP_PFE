@@ -612,47 +612,7 @@ def push_to_grafana(database_name, cpu, ram, sessions):
         requests.post(url, auth=auth, data=data, timeout=3)
         return True
     except: return False
-
-# ==========================================
-# 6. HISTORISATION DES MÉTRIQUES (NEW)
-# ==========================================
-
-def save_metrics_to_history(id_base, cpu, ram, sessions):
-    """ Sauvegarde un point de mesure dans la table locale METRICS_HISTORY """
-    conn = get_oracle_connection()
-    if not conn: return
-    try:
-        cursor = conn.cursor()
-        sql = "INSERT INTO METRICS_HISTORY (ID_BASE, CPU_USAGE, RAM_USAGE, SESSIONS_COUNT) VALUES (:1, :2, :3, :4)"
-        cursor.execute(sql, (id_base, cpu, ram, sessions))
-        conn.commit()
-    except Exception as e: print(f"Erreur historique : {e}")
-    finally:
-        if 'conn' in locals(): conn.close()
-
-def get_history_from_oracle(id_base, time_range="24h"):
-    """ Récupère l'historique formaté pour les graphiques React """
-    conn = get_oracle_connection()
-    if not conn: return []
-    days = 1
-    if time_range == "7d": days = 7
-    elif time_range == "30d": days = 30
-    try:
-        cursor = conn.cursor()
-        sql = """
-            SELECT TO_CHAR(TIMESTAMP, 'DD/MM HH24:MI'), CPU_USAGE, RAM_USAGE, SESSIONS_COUNT
-            FROM METRICS_HISTORY
-            WHERE ID_BASE = :id AND TIMESTAMP >= SYSDATE - :d
-            ORDER BY TIMESTAMP ASC
-        """
-        cursor.execute(sql, id=id_base, d=days)
-        return [{"time": r[0], "cpu": r[1], "ram": r[2], "sessions": r[3]} for r in cursor.fetchall()]
-    except Exception as e:
-        print(f"Erreur lecture historique : {e}")
-        return []
-    finally:
-        if 'conn' in locals(): conn.close()
-
+    
 # ==========================================
 # 7. HISTORIQUE DES RAPPORTS PDF
 # ==========================================
@@ -904,14 +864,30 @@ def save_audit_report(id_base, ai_analysis_result):
     pdf_string = pdf.output(dest='S')
     pdf_bytes = pdf_string.encode('latin-1')
 
-    # 4. Insertion Oracle BLOB
+    # 4. Insertion Oracle BLOB et JSON
     conn = get_oracle_connection()
     try:
         cursor = conn.cursor()
-        # Déclaration explicite du type BLOB pour garantir le stockage
-        cursor.setinputsizes(None, oracledb.DB_TYPE_BLOB)
-        sql_insert = "INSERT INTO historiques_audits (date_generation, nom_base_cible, fichier_pdf) VALUES (CURRENT_TIMESTAMP, :1, :2)"
-        cursor.execute(sql_insert, [nom_base, pdf_bytes])
+        # Déclaration explicite du type BLOB et CLOB (pour le JSON) pour garantir le stockage
+        cursor.setinputsizes(None, oracledb.DB_TYPE_BLOB, oracledb.DB_TYPE_CLOB)
+        
+        import json
+        audit_json_str = json.dumps(audit_data, ensure_ascii=False)
+        
+        try:
+            # 4.1 Tentative avec le JSON (Nouvelle colonne)
+            sql_insert = "INSERT INTO historiques_audits (date_generation, nom_base_cible, fichier_pdf, donnees_json_brutes) VALUES (CURRENT_TIMESTAMP, :1, :2, :3)"
+            cursor.execute(sql_insert, [nom_base, pdf_bytes, audit_json_str])
+        except oracledb.Error as e:
+            if "ORA-00904" in str(e):
+                print(f"[WARNING] Colonne 'donnees_json_brutes' manquante. Sauvegarde du PDF uniquement.")
+                # Fallback : Insertion sans le JSON pour ne pas bloquer l'utilisateur
+                cursor.setinputsizes(None, oracledb.DB_TYPE_BLOB)
+                sql_insert_fallback = "INSERT INTO historiques_audits (date_generation, nom_base_cible, fichier_pdf) VALUES (CURRENT_TIMESTAMP, :1, :2)"
+                cursor.execute(sql_insert_fallback, [nom_base, pdf_bytes])
+            else:
+                raise e
+        
         print(f"[DEBUG] Taille du PDF généré : {len(pdf_bytes)} octets")
         conn.commit()
         return True, "Rapport archivé avec succès en base de données (BLOB)."
@@ -948,5 +924,41 @@ def delete_audit_report(id_audit):
         return True, "Rapport supprimé avec succès."
     except Exception as e:
         return False, str(e)
+    finally:
+        if 'conn' in locals() and conn: conn.close()
+
+def get_last_audit_data(id_base):
+    """
+    Récupère le JSON brut de l'audit précédent pour cette base, s'il existe.
+    """
+    creds = get_target_credentials(id_base)
+    if not creds: return None
+    nom_base = creds[4]
+    
+    conn = get_oracle_connection()
+    if not conn: return None
+    try:
+        cursor = conn.cursor()
+        sql = """
+            SELECT donnees_json_brutes 
+            FROM historiques_audits 
+            WHERE UPPER(nom_base_cible) = UPPER(:1)
+            AND donnees_json_brutes IS NOT NULL
+            ORDER BY date_generation DESC
+            FETCH FIRST 1 ROWS ONLY
+        """
+        cursor.execute(sql, [nom_base])
+        row = cursor.fetchone()
+        if not row: return None
+        
+        import json
+        json_str = row[0].read() if hasattr(row[0], 'read') else str(row[0])
+        return json.loads(json_str)
+    except Exception as e:
+        if "ORA-00904" in str(e):
+            print(f"[DEBUG] Colonne 'donnees_json_brutes' absente. Comparaison historique désactivée.")
+        else:
+            print(f"[DEBUG] Erreur get_last_audit_data : {e}")
+        return None
     finally:
         if 'conn' in locals() and conn: conn.close()

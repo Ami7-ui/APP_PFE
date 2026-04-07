@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../api';
+import useAppStore from '../store/useAppStore';
 import GlassCard from '../components/GlassCard';
 import { 
   ShieldCheck, Database, Rocket, Info, Users, Activity, Loader2, 
@@ -73,33 +75,37 @@ const mockDataMetrics = {
   }
 };
 
-export default function AuditPage({ onNavigate }) {
-  const [bases, setBases]     = useState([]);
-  const [selected, setSelected] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [result, setResult]   = useState(null);
-  const [error, setError]     = useState('');
-  const [tab, setTab]         = useState('performance');
-  
-  // States pour le plan d'exécution SQL
-  const [selectedPlan, setSelectedPlan] = useState(null);
+export default function AuditPage() {
+  const navigate = useNavigate();
+  const { auditState, setAuditState } = useAppStore();
+  const { selectedBase, result, activeTab: tab, loading, error, selectedPlan, activeSqlId } = auditState;
+
+  // Transient state
+  const [bases, setBases] = useState([]);
   const [loadingPlan, setLoadingPlan] = useState(false);
-  const [activeSqlId, setActiveSqlId] = useState(null);
+
+  // Store helpers
+  const setSelected = (val) => setAuditState({ selectedBase: val });
+  const setLoading = (val) => setAuditState({ loading: val });
+  const setResult = (val) => setAuditState({ result: val });
+  const setError = (val) => setAuditState({ error: val });
+  const setTab = (val) => setAuditState({ activeTab: val });
+  const setSelectedPlan = (val) => setAuditState({ selectedPlan: val });
+  const setActiveSqlId = (val) => setAuditState({ activeSqlId: val });
 
   useEffect(() => {
     api.get('/api/bases').then(r => {
       setBases(r.data);
-      if (r.data.length) setSelected(String(r.data[0].ID));
+      if (r.data.length && !selectedBase) setSelected(String(r.data[0].ID));
     }).catch(() => {
       // Pour la démo, on peut ignorer ou fallback
     });
-  }, []);
+  }, [selectedBase]);
 
   const launch = async () => {
-    setLoading(true); setError(''); setResult(null);
-    setSelectedPlan(null); setActiveSqlId(null);
+    setAuditState({ loading: true, error: '', result: null, selectedPlan: null, activeSqlId: null });
     try {
-      const { data } = await api.get(`/api/audit/full/${selected}`);
+      const { data } = await api.get(`/api/audit/full/${selectedBase}`);
       // On fusionne les données réelles avec les mocks par défaut pour les champs non implémentés
       const fullData = data.data;
       setResult({ 
@@ -131,8 +137,8 @@ export default function AuditPage({ onNavigate }) {
   };
 
   const launchAiAnalysis = () => {
-    localStorage.setItem('og_audit_analyze_request', JSON.stringify({ id_base: selected }));
-    if (onNavigate) onNavigate('assistant_ia');
+    localStorage.setItem('og_audit_analyze_request', JSON.stringify({ id_base: selectedBase }));
+    navigate('/assistant-ia');
   };
 
   const fetchExecutionPlan = async (id_base, sql_id) => {
@@ -209,13 +215,13 @@ export default function AuditPage({ onNavigate }) {
           <div style={{ flex: 1, minWidth: 250 }}>
             <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Database size={14} /> Cibler une instance pour l'audit</label>
             <div style={{ position: 'relative' }}>
-              <select value={selected} onChange={e => setSelected(e.target.value)} style={{ paddingLeft: 44, height: 50 }}>
+              <select value={selectedBase} onChange={e => setSelected(e.target.value)} style={{ paddingLeft: 44, height: 50 }}>
                 {bases.length > 0 ? bases.map(b => <option key={b.ID} value={b.ID}>{b.Instance} — {b.IP}</option>) : <option value="demo">Demo Instance (Mock)</option>}
               </select>
               <Database size={18} color="#64748b" style={{ position: 'absolute', left: 16, top: 16, pointerEvents: 'none' }} />
             </div>
           </div>
-          <button className="btn btn-primary" onClick={launch} disabled={loading || (!selected && bases.length === 0 && !selected)} style={{ height: 50, padding: '0 32px' }}>
+          <button className="btn btn-primary" onClick={launch} disabled={loading || (!selectedBase && bases.length === 0)} style={{ height: 50, padding: '0 32px' }}>
             {loading ? <><Loader2 size={18} className="spinner" /> EXTRACTION...</> : <><Rocket size={18} /> LANCER L'ANALYSE</>}
           </button>
         </div>
@@ -444,7 +450,7 @@ export default function AuditPage({ onNavigate }) {
                       <tbody>{getMetric('queries').slow_queries.map((s,i) => (
                         <tr 
                           key={i}
-                          onClick={() => fetchExecutionPlan(selected, s.sql_id)}
+                          onClick={() => fetchExecutionPlan(selectedBase, s.sql_id)}
                           style={{ cursor: 'pointer', backgroundColor: activeSqlId === s.sql_id ? 'rgba(139, 92, 246, 0.15)' : 'transparent', transition: 'background-color 0.2s ease' }}
                         >
                           <td style={{ fontWeight: 800, color: '#38bdf8', fontSize: '1rem', textAlign: 'center' }}>{i + 1}</td>

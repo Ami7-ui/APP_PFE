@@ -78,7 +78,6 @@ class ReportSaveRequest(BaseModel):
     id_base: int
     ai_result: dict
 
-# ── COLLECTEUR AUTOMATIQUE (BACKGROUND TASK) ──────────────────────────────────
 # ── ROUTES AUTHENTIFICATION ───────────────────────────────────────────────────
 
 @app.post("/api/login")
@@ -252,9 +251,13 @@ async def analyze_audit(req: AuditAnalysisRequest):
     ok, msg, audit_data = db_functions.executer_audit_complet(req.id_base)
     if not ok: raise HTTPException(status_code=503, detail=msg)
 
+    # SECURE STAGE 1: Get latest data + previous audit data for local comparison
+    last_audit_data = db_functions.get_last_audit_data(req.id_base)
+
     try:
-        # Utilisation du service IA dédié pour les 6 catégories
-        analysis_result = ai_service.analyze_database_health(audit_data)
+        # SECURE PIPELINE ORCHESTRATION: 
+        # Local JSON diagnosis -> anomaly extraction -> Cloud remedies
+        analysis_result = ai_service.analyze_database_health(audit_data, last_audit_data)
         
         # On retourne directement l'objet JSON formaté
         return {"rapport_ia": analysis_result}

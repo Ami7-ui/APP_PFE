@@ -1,5 +1,6 @@
 import React from 'react';
 // NOUVEAU : Ajout de l'icône Bot pour l'IA
+import { NavLink } from 'react-router-dom';
 import { LayoutDashboard, ShieldCheck, Settings, Database, Code, Users, LogOut, Shield, Bot, FileText } from 'lucide-react'; 
 
 const ROLE_COLORS = {
@@ -10,18 +11,17 @@ const ROLE_LABELS = {
 };
 
 const NAV_ITEMS = [
-  { key: 'dashboard',      label: 'Tableau de Bord',      Icon: LayoutDashboard, roles: ['super_admin','admin','consultant','dba'] },
-  { key: 'audit',          label: 'Audit Système',          Icon: ShieldCheck,     roles: ['super_admin','admin','consultant'] },
-  { key: 'configuration',  label: 'Diagnostics SQL',        Icon: Settings,        roles: ['super_admin','admin'] },
-  { key: 'cibles',         label: 'Bases Cibles',           Icon: Database,        roles: ['super_admin','admin'] },
-  { key: 'scripts',        label: 'Scripts Métriques',      Icon: Code,            roles: ['super_admin'] },
-  { key: 'users',          label: 'Contrôle Accès',         Icon: Users,           roles: ['super_admin'] },
-  // NOUVEAU : Le bouton Assistant IA
-  { key: 'assistant_ia',   label: 'Assistant IA',           Icon: Bot,             roles: ['super_admin','admin','consultant','dba'] }, 
-  { key: 'reports_history', label: 'Historique Rapports',    Icon: FileText,        roles: ['super_admin','admin','consultant','dba'] },
+  { key: '',              label: 'Tableau de Bord',      Icon: LayoutDashboard, roles: ['super_admin','admin','consultant','dba'] },
+  { key: 'audit',         label: 'Audit Système',          Icon: ShieldCheck,     roles: ['super_admin','admin','consultant'] },
+  { key: 'configuration', label: 'Diagnostics SQL',        Icon: Settings,        roles: ['super_admin','admin'] },
+  { key: 'cibles',        label: 'Bases Cibles',           Icon: Database,        roles: ['super_admin','admin'] },
+  { key: 'scripts',       label: 'Scripts Métriques',      Icon: Code,            roles: ['super_admin'] },
+  { key: 'users',         label: 'Contrôle Accès',         Icon: Users,           roles: ['super_admin'] },
+  { key: 'assistant-ia',  label: 'Assistant IA',           Icon: Bot,             roles: ['super_admin','admin','consultant','dba'] }, 
+  { key: 'reports-history', label: 'Historique Rapports',  Icon: FileText,        roles: ['super_admin','admin','consultant','dba'] },
 ];
 
-export default function Sidebar({ user, page, onNavigate, onLogout }) {
+export default function Sidebar({ user, onLogout }) {
   const role = user?.role || 'consultant';
   const roleColor = ROLE_COLORS[role] || '#64748b';
   const roleLabel = ROLE_LABELS[role] || role.toUpperCase();
@@ -89,27 +89,31 @@ export default function Sidebar({ user, page, onNavigate, onLogout }) {
 
       {/* Navigation */}
       <nav style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {visibleNav.map(n => {
-          const isActive = page === n.key;
-          return (
-            <button key={n.key} onClick={() => onNavigate(n.key)} style={{
+        {visibleNav.map(n => (
+          <NavLink 
+            key={n.key} 
+            to={`/${n.key}`}
+            style={({ isActive }) => ({
               display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px',
               borderRadius: 12, border: 'none', cursor: 'pointer', textAlign: 'left', width: '100%',
-              fontSize: '0.88rem', fontWeight: isActive ? 700 : 500,
+              fontSize: '0.88rem', fontWeight: isActive ? 700 : 500, textDecoration: 'none',
               background: isActive ? 'linear-gradient(90deg, rgba(14, 165, 233, 0.15) 0%, transparent 100%)' : 'transparent',
               color: isActive ? '#38bdf8' : '#94a3b8',
               borderLeft: isActive ? '4px solid #0ea5e9' : '4px solid transparent',
               transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
               boxShadow: isActive ? 'inset 10px 0 20px -10px rgba(14, 165, 233, 0.3)' : 'none'
-            }}
-            onMouseEnter={e => { if(!isActive) { e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; e.currentTarget.style.color = '#e2e8f0'; } }}
-            onMouseLeave={e => { if(!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#94a3b8'; } }}
-            >
-              <n.Icon size={20} color={isActive ? '#38bdf8' : '#64748b'} strokeWidth={isActive ? 2.5 : 2} style={{ transition: 'color 0.2s' }} />
-              {n.label}
-            </button>
-          );
-        })}
+            })}
+            onMouseEnter={e => { if(!e.currentTarget.classList.contains('active')) { e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; e.currentTarget.style.color = '#e2e8f0'; } }}
+            onMouseLeave={e => { if(!e.currentTarget.classList.contains('active')) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#94a3b8'; } }}
+          >
+            {({ isActive }) => (
+              <>
+                <n.Icon size={20} color={isActive ? '#38bdf8' : '#64748b'} strokeWidth={isActive ? 2.5 : 2} style={{ transition: 'color 0.2s' }} />
+                {n.label}
+              </>
+            )}
+          </NavLink>
+        ))}
       </nav>
 
       <div style={{ flex: 1 }} />

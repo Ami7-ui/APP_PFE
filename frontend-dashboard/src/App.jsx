@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import './index.css';
 import Sidebar from './components/Sidebar';
@@ -11,6 +12,7 @@ import ScriptsPage from './pages/ScriptsPage';
 import UsersPage from './pages/UsersPage';
 import AiAssistantPage from './pages/AiAssistantPage'; 
 import ReportsHistoryPage from './pages/ReportsHistoryPage';
+import useAppStore from './store/useAppStore';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -47,55 +49,52 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-const PAGE_COMPONENTS = {
-  dashboard:     DashboardPage,
-  audit:         AuditPage,
-  configuration: ConfigurationPage,
-  cibles:        CiblesPage,
-  scripts:       ScriptsPage,
-  users:         UsersPage,
-  assistant_ia:  AiAssistantPage,
-  reports_history: ReportsHistoryPage,
+const ProtectedRoute = ({ children }) => {
+  const user = useAppStore((state) => state.user);
+  if (!user) return <Navigate to="/login" replace />;
+  return children;
 };
 
 export default function App() {
-  const [user, setUser]   = useState(() => {
-    try { return JSON.parse(localStorage.getItem('og_user')) || null; }
-    catch { return null; }
-  });
-  const [page, setPage] = useState('dashboard');
-
-  useEffect(() => {
-    if (user) localStorage.setItem('og_user', JSON.stringify(user));
-    else      localStorage.removeItem('og_user');
-  }, [user]);
+  const { user, setUser } = useAppStore();
 
   const handleLogin = (userData) => {
     setUser(userData);
-    setPage('dashboard');
   };
 
   const handleLogout = () => {
     setUser(null);
-    setPage('dashboard');
   };
-
-  if (!user) return <LoginPage onLogin={handleLogin} />;
-
-  const PageComponent = PAGE_COMPONENTS[page] || DashboardPage;
 
   return (
     <QueryClientProvider client={queryClient}>
       <ErrorBoundary>
-        <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', width: '100%' }}>
-          <div style={{ height: 4, background: 'linear-gradient(90deg, #0ea5e9, #8b5cf6)', opacity: 0.5 }}></div>
-          <div style={{ display: 'flex', flex: 1 }}>
-          <Sidebar user={user} page={page} onNavigate={setPage} onLogout={handleLogout} />
-          <main className="page-content" style={{ flex: 1, padding: '20px', backgroundColor: '#0c0d0d' }}>
-            <PageComponent user={user} onNavigate={setPage} />
-          </main>
-          </div>
-        </div>
+        <Routes>
+          <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage onLogin={handleLogin} />} />
+          <Route path="/*" element={
+            <ProtectedRoute>
+              <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', width: '100%' }}>
+                <div style={{ height: 4, background: 'linear-gradient(90deg, #0ea5e9, #8b5cf6)', opacity: 0.5 }}></div>
+                <div style={{ display: 'flex', flex: 1 }}>
+                  <Sidebar user={user} onLogout={handleLogout} />
+                  <main className="page-content" style={{ flex: 1, padding: '20px', backgroundColor: '#0c0d0d' }}>
+                    <Routes>
+                      <Route path="/" element={<DashboardPage user={user} />} />
+                      <Route path="/dashboard" element={<Navigate to="/" replace />} />
+                      <Route path="/audit" element={<AuditPage user={user} />} />
+                      <Route path="/configuration" element={<ConfigurationPage user={user} />} />
+                      <Route path="/cibles" element={<CiblesPage user={user} />} />
+                      <Route path="/scripts" element={<ScriptsPage user={user} />} />
+                      <Route path="/users" element={<UsersPage user={user} />} />
+                      <Route path="/assistant-ia" element={<AiAssistantPage user={user} />} />
+                      <Route path="/reports-history" element={<ReportsHistoryPage user={user} />} />
+                    </Routes>
+                  </main>
+                </div>
+              </div>
+            </ProtectedRoute>
+          } />
+        </Routes>
       </ErrorBoundary>
     </QueryClientProvider>
   );

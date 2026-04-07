@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import api from '../api';
-import { Bot, Zap, Search, Activity, Database, Sparkles, AlertCircle, CheckCircle, Terminal, AlertTriangle } from 'lucide-react';
+import { Bot, Zap, Activity, Database, Sparkles, CheckCircle, Terminal, AlertTriangle, ShieldCheck, Lock, Cpu, Cloud, ArrowRight } from 'lucide-react';
 import AiResponseViewer from '../components/AiResponseViewer';
+import useAppStore from '../store/useAppStore';
 
 const cardStyle = {
   background: 'rgba(30, 41, 59, 0.4)',
@@ -19,36 +20,170 @@ const SectionTitle = ({ icon: Icon, title, color }) => (
   </h4>
 );
 
+// ── COMPOSANT : Indicateur de Chargement Multi-Étapes ──────────────────────
+const PIPELINE_STEPS = [
+  { id: 1, label: 'Collecte des métriques (Audit complet)', icon: Database, color: '#38bdf8' },
+  { id: 2, label: 'Diagnostic local sécurisé (LLaMA 3)', icon: Cpu, color: '#8b5cf6' },
+  { id: 3, label: 'Extraction & purge des données sensibles', icon: Lock, color: '#f59e0b' },
+  { id: 4, label: 'Consultation Expert Cloud (Nvidia Nemotron)', icon: Cloud, color: '#10b981' },
+];
+
+function PipelineLoader({ currentStep }) {
+  return (
+    <div style={{ ...cardStyle, border: '1px solid rgba(139, 92, 246, 0.3)', background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(30, 41, 59, 0.7))' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
+        <div style={{ width: 40, height: 40, borderRadius: 10, background: 'linear-gradient(135deg, #8b5cf6, #d946ef)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 20px rgba(139,92,246,0.4)' }}>
+          <ShieldCheck size={22} color="white" />
+        </div>
+        <div>
+          <div style={{ color: '#f8fafc', fontWeight: 700, fontSize: '1rem' }}>Pipeline Hybride Sécurisé en cours...</div>
+          <div style={{ color: '#64748b', fontSize: '0.8rem' }}>Les données brutes restent sur le serveur local</div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {PIPELINE_STEPS.map((step) => {
+          const StepIcon = step.icon;
+          const isDone = currentStep > step.id;
+          const isActive = currentStep === step.id;
+          return (
+            <div key={step.id} style={{
+              display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px',
+              borderRadius: 10,
+              background: isActive ? 'rgba(139, 92, 246, 0.1)' : isDone ? 'rgba(16, 185, 129, 0.05)' : 'transparent',
+              border: isActive ? '1px solid rgba(139, 92, 246, 0.3)' : '1px solid transparent',
+              transition: 'all 0.4s ease',
+              opacity: isDone || isActive ? 1 : 0.4
+            }}>
+              <div style={{
+                width: 32, height: 32, borderRadius: 8,
+                background: isDone ? 'rgba(16, 185, 129, 0.15)' : isActive ? `rgba(139, 92, 246, 0.15)` : 'rgba(255,255,255,0.03)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'all 0.3s ease'
+              }}>
+                {isDone ? <CheckCircle size={18} color="#10b981" /> : isActive ? <StepIcon size={18} color={step.color} className="animate-pulse" /> : <StepIcon size={18} color="#475569" />}
+              </div>
+              <span style={{ flex: 1, fontSize: '0.9rem', color: isDone ? '#10b981' : isActive ? '#f8fafc' : '#475569', fontWeight: isActive ? 700 : 400, transition: 'all 0.3s ease' }}>
+                {step.label}
+              </span>
+              {isDone && <span style={{ fontSize: '0.7rem', color: '#10b981', fontWeight: 700, background: 'rgba(16,185,129,0.1)', padding: '3px 10px', borderRadius: 20 }}>TERMINÉ</span>}
+              {isActive && <span style={{ fontSize: '0.7rem', color: '#a78bfa', fontWeight: 700, background: 'rgba(139,92,246,0.1)', padding: '3px 10px', borderRadius: 20, animation: 'pulse 1.5s infinite' }}>EN COURS</span>}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ marginTop: 20, height: 4, borderRadius: 4, background: 'rgba(255,255,255,0.05)', overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${(currentStep / PIPELINE_STEPS.length) * 100}%`, background: 'linear-gradient(90deg, #8b5cf6, #d946ef, #10b981)', borderRadius: 4, transition: 'width 0.8s ease' }} />
+      </div>
+    </div>
+  );
+}
+
+// ── COMPOSANT : Rendu des Résultats IA ─────────────────────────────────────
 function AnalysisRenderer({ rapport_ia, analyse_ia, reponse, status, diagnostic_local, solutions_expertes }) {
   const content = rapport_ia || { status, diagnostic_local, solutions_expertes } || analyse_ia || reponse;
 
-  // Si c'est le nouveau format Hybride
+  // Pipeline Hybride Sécurisé
   if (content.status === 'success' || content.diagnostic_local) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', animation: 'fadeIn 0.5s ease' }}>
-        {/* Niveau 1 : Junior (Llama 3 Local) */}
-        <div style={{ ...cardStyle, borderLeft: '4px solid #3b82f6', background: 'linear-gradient(90deg, rgba(59, 130, 246, 0.1), transparent)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-            <SectionTitle icon={Bot} title="Audit Local (LLaMA 3 Junior)" color="#60a5fa" />
-            <span style={{ fontSize: '0.7rem', color: '#60a5fa', background: 'rgba(59, 130, 246, 0.1)', padding: '4px 10px', borderRadius: '12px', fontWeight: 700 }}>NIVEAU 1 : CONSTAT</span>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '28px', animation: 'fadeIn 0.5s ease', marginTop: 24 }}>
+
+        {/* Bandeau Sécurité */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px',
+          background: 'linear-gradient(90deg, rgba(16, 185, 129, 0.08), rgba(139, 92, 246, 0.08))',
+          border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: 12
+        }}>
+          <ShieldCheck size={20} color="#10b981" />
+          <span style={{ color: '#94a3b8', fontSize: '0.85rem' }}>
+            <strong style={{ color: '#10b981' }}>Pipeline Hybride Sécurisé</strong> — Les données brutes ont été traitées localement par LLaMA 3. Seules les anomalies textuelles ont transité vers le Cloud.
+          </span>
+        </div>
+
+        {/* ─── NIVEAU 1 : Diagnostic Local (LLaMA 3) ─────────────────────── */}
+        <div style={{
+          ...cardStyle,
+          borderLeft: '4px solid #8b5cf6',
+          background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.06), transparent)',
+          position: 'relative', overflow: 'hidden'
+        }}>
+          {/* Accent glow */}
+          <div style={{ position: 'absolute', top: -40, right: -40, width: 120, height: 120, borderRadius: '50%', background: 'rgba(139, 92, 246, 0.06)', filter: 'blur(40px)' }} />
+          
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', position: 'relative', zIndex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(139, 92, 246, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Cpu size={20} color="#a78bfa" />
+              </div>
+              <div>
+                <h4 style={{ margin: 0, color: '#e2e8f0', fontSize: '1rem', fontWeight: 700 }}>Diagnostic Local — LLaMA 3</h4>
+                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Évolution des 6 catégories & Anomalies détectées</span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <span style={{ fontSize: '0.65rem', color: '#a78bfa', background: 'rgba(139, 92, 246, 0.1)', padding: '4px 12px', borderRadius: 20, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Lock size={10} /> DONNÉES LOCALES
+              </span>
+              <span style={{ fontSize: '0.65rem', color: '#64748b', background: 'rgba(255,255,255,0.05)', padding: '4px 12px', borderRadius: 20, fontWeight: 600 }}>
+                ÉTAPE 1 & 2
+              </span>
+            </div>
           </div>
-          <div style={{ fontSize: '1rem', color: '#cbd5e1', lineHeight: '1.7' }}>
+          <div style={{ fontSize: '0.95rem', color: '#cbd5e1', lineHeight: '1.75', position: 'relative', zIndex: 1 }}>
             <AiResponseViewer content={content.diagnostic_local} />
           </div>
         </div>
 
-        {/* Niveau 2 : Senior (Nvidia Expert) */}
-        <div style={{ ...cardStyle, borderLeft: '4px solid #10b981', background: 'linear-gradient(90deg, rgba(16, 185, 129, 0.1), transparent)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-            <SectionTitle icon={Zap} title="Solutions Expertes (Nvidia Senior)" color="#34d399" />
-            <span style={{ fontSize: '0.7rem', color: '#34d399', background: 'rgba(16, 185, 129, 0.1)', padding: '4px 10px', borderRadius: '12px', fontWeight: 700 }}>NIVEAU 2 : OPTIMISATION</span>
+        {/* ─── Séparateur visuel ──────────────────────────────────────────── */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '0 20px' }}>
+          <div style={{ flex: 1, height: 1, background: 'linear-gradient(90deg, transparent, rgba(139,92,246,0.3), rgba(16,185,129,0.3), transparent)' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#64748b', fontSize: '0.75rem', fontWeight: 600 }}>
+            <Lock size={12} color="#f59e0b" />
+            EXTRACTION SÉCURISÉE
+            <ArrowRight size={14} color="#64748b" />
           </div>
-          <div style={{ fontSize: '1.05rem', color: '#f1f5f9', lineHeight: '1.8', background: 'rgba(0,0,0,0.2)', padding: '20px', borderRadius: '12px', border: '1px solid rgba(16, 185, 129, 0.1)' }}>
+          <div style={{ flex: 1, height: 1, background: 'linear-gradient(90deg, transparent, rgba(16,185,129,0.3), rgba(139,92,246,0.3), transparent)' }} />
+        </div>
+
+        {/* ─── NIVEAU 2 : Solutions Cloud (Nvidia Nemotron) ───────────────── */}
+        <div style={{
+          ...cardStyle,
+          borderLeft: '4px solid #10b981',
+          background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.06), transparent)',
+          position: 'relative', overflow: 'hidden'
+        }}>
+          {/* Accent glow */}
+          <div style={{ position: 'absolute', top: -40, right: -40, width: 120, height: 120, borderRadius: '50%', background: 'rgba(16, 185, 129, 0.06)', filter: 'blur(40px)' }} />
+          
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', position: 'relative', zIndex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(16, 185, 129, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Cloud size={20} color="#34d399" />
+              </div>
+              <div>
+                <h4 style={{ margin: 0, color: '#e2e8f0', fontSize: '1rem', fontWeight: 700 }}>Solutions Expertes — Nvidia Nemotron</h4>
+                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Recommandations SQL/PLSQL & Prévention</span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <span style={{ fontSize: '0.65rem', color: '#34d399', background: 'rgba(16, 185, 129, 0.1)', padding: '4px 12px', borderRadius: 20, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Cloud size={10} /> API CLOUD
+              </span>
+              <span style={{ fontSize: '0.65rem', color: '#64748b', background: 'rgba(255,255,255,0.05)', padding: '4px 12px', borderRadius: 20, fontWeight: 600 }}>
+                ÉTAPE 3 & 4
+              </span>
+            </div>
+          </div>
+          <div style={{
+            fontSize: '0.95rem', color: '#f1f5f9', lineHeight: '1.8',
+            background: 'rgba(0,0,0,0.2)', padding: '20px', borderRadius: '12px',
+            border: '1px solid rgba(16, 185, 129, 0.1)',
+            position: 'relative', zIndex: 1
+          }}>
             <AiResponseViewer content={content.solutions_expertes} />
           </div>
-          <div style={{ marginTop: '15px', display: 'flex', alignItems: 'center', gap: '10px', color: '#64748b', fontSize: '0.8rem' }}>
-            <CheckCircle size={14} />
-            <span>Recommandations basées sur le moteur Nvidia Nemotron v2</span>
+          <div style={{ marginTop: '15px', display: 'flex', alignItems: 'center', gap: '10px', color: '#64748b', fontSize: '0.8rem', position: 'relative', zIndex: 1 }}>
+            <CheckCircle size={14} color="#10b981" />
+            <span>Analyse propulsée par <strong style={{ color: '#34d399' }}>Nvidia Nemotron Nano 9B v2</strong> — Aucune donnée brute transmise</span>
           </div>
         </div>
       </div>
@@ -102,13 +237,58 @@ function AnalysisRenderer({ rapport_ia, analyse_ia, reponse, status, diagnostic_
 
 export default function AiAssistantPage() {
   const queryClient = useQueryClient();
-  const [sqlToAnalyze, setSqlToAnalyze] = useState("");
-  const [result, setResult] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [bases, setBases] = useState([]);
-  const [selectedBase, setSelectedBase] = useState("");
-  const [saveLoading, setSaveLoading] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
+  const { aiState, setAiState } = useAppStore();
+  const { sqlToAnalyze, result, loading, pipelineStep, selectedBase } = aiState;
+
+  // UI-only state (these reset when navigating away, which is fine)
+  const [bases, setBases] = React.useState([]);
+  const [saveLoading, setSaveLoading] = React.useState(false);
+  const [saveSuccess, setSaveSuccess] = React.useState(false);
+  const pipelineTimerRef = useRef(null);
+
+  // Helpers to update individual fields in the store
+  const setSqlToAnalyze = (val) => setAiState({ sqlToAnalyze: val });
+  const setResult = (val) => setAiState({ result: val });
+  const setLoading = (val) => setAiState({ loading: val });
+  const setPipelineStep = (val) => setAiState({ pipelineStep: val });
+  const setSelectedBase = (val) => setAiState({ selectedBase: val });
+
+  // Simule la progression visuelle du pipeline pendant l'appel API
+  const startPipelineAnimation = () => {
+    setAiState({ pipelineStep: 1 });
+    let step = 1;
+    pipelineTimerRef.current = setInterval(() => {
+      step += 1;
+      if (step <= 4) {
+        setAiState({ pipelineStep: step });
+      } else {
+        clearInterval(pipelineTimerRef.current);
+      }
+    }, 8000); // ~8s par étape (le pipeline complet prend ~30-40s)
+  };
+
+  const stopPipelineAnimation = () => {
+    if (pipelineTimerRef.current) clearInterval(pipelineTimerRef.current);
+    setAiState({ pipelineStep: 5 }); // Toutes les étapes terminées
+  };
+
+  const runSecureAudit = async (id_base) => {
+    setAiState({ loading: true, result: null });
+    setSaveSuccess(false);
+    startPipelineAnimation();
+    try {
+      const res = await api.post('/api/ai/analyze_audit', {
+        id_base: parseInt(id_base)
+      });
+      setAiState({ result: res.data });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
+    } catch {
+      alert("Erreur lors de l'analyse IA de l'audit.");
+    } finally {
+      stopPipelineAnimation();
+      setAiState({ loading: false });
+    }
+  };
 
   useEffect(() => {
     const fetchBasesAndCheckAudit = async () => {
@@ -124,37 +304,25 @@ export default function AiAssistantPage() {
         console.error("Erreur chargement bases:", err);
       }
 
+      // Cross-page trigger: AuditPage sets this in localStorage, we pick it up once
       const stored = localStorage.getItem('og_audit_analyze_request');
       if (stored) {
         localStorage.removeItem('og_audit_analyze_request');
         const { id_base } = JSON.parse(stored);
         setSelectedBase(String(id_base));
-        
-        setLoading(true);
-        setResult(null);
-        try {
-          const res = await api.post('/api/ai/analyze_audit', {
-            id_base: parseInt(id_base)
-          });
-          setResult(res.data);
-          // Invalidation de l'historique des rapports pour forcer la mise à jour
-          queryClient.invalidateQueries({ queryKey: ['reports'] });
-        } catch {
-          alert("Erreur lors de l'analyse IA de l'audit.");
-        } finally {
-          setLoading(false);
-        }
+        await runSecureAudit(id_base);
       } else {
-        if (initialBaseId) setSelectedBase(initialBaseId);
+        // Only set default base if none is already selected in the store
+        if (!selectedBase && initialBaseId) setSelectedBase(String(initialBaseId));
       }
     };
     fetchBasesAndCheckAudit();
+    return () => { if (pipelineTimerRef.current) clearInterval(pipelineTimerRef.current); };
   }, []);
 
   const handleDeepAnalysis = async () => {
     if (!selectedBase || !sqlToAnalyze) return;
-    setLoading(true);
-    setResult(null);
+    setAiState({ loading: true, result: null });
     try {
       const res = await api.post('/api/ai/analyze_sql', {
         id_base: parseInt(selectedBase),
@@ -189,18 +357,31 @@ export default function AiAssistantPage() {
   return (
     <div style={{ color: '#f1f5f9', maxWidth: '1400px', margin: '0 auto', padding: '0 20px' }}>
       {/* Header */}
-      <div style={{ marginBottom: '30px', display: 'flex', alignItems: 'center', gap: '15px' }}>
-        <div style={{ 
-          width: '50px', height: '50px', borderRadius: '12px', 
-          background: 'linear-gradient(135deg, #8b5cf6, #d946ef)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: '0 0 20px rgba(139, 92, 246, 0.4)'
-        }}>
-          <Bot size={30} color="white" />
+      <div style={{ marginBottom: '30px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+          <div style={{ 
+            width: '50px', height: '50px', borderRadius: '12px', 
+            background: 'linear-gradient(135deg, #8b5cf6, #d946ef)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 0 20px rgba(139, 92, 246, 0.4)'
+          }}>
+            <Bot size={30} color="white" />
+          </div>
+          <div>
+            <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.02em' }}>Assistant DBA Intelligent</h2>
+            <p style={{ margin: 0, color: '#94a3b8', fontSize: '0.9rem' }}>Pipeline Hybride Sécurisé — Diagnostic Local + Solutions Cloud</p>
+          </div>
         </div>
-        <div>
-          <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.02em' }}>Assistant DBA Intelligent</h2>
-          <p style={{ margin: 0, color: '#94a3b8', fontSize: '0.9rem' }}>Analyse de performance et optimisation de plans d'exécution par IA (LLaMA 3)</p>
+        {/* Badge Sécurité */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px',
+          background: 'linear-gradient(90deg, rgba(16, 185, 129, 0.08), rgba(139, 92, 246, 0.08))',
+          border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: 10
+        }}>
+          <ShieldCheck size={16} color="#10b981" />
+          <span style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 600 }}>
+            <span style={{ color: '#10b981' }}>SECURE</span> — Données brutes jamais envoyées au Cloud
+          </span>
         </div>
       </div>
 
@@ -226,7 +407,7 @@ export default function AiAssistantPage() {
             </select>
           </div>
           <div style={{ color: '#64748b', fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.1em' }}>
-            ORACLEGUARD AI ENGINE V1.2.5
+            ORACLEGUARD HYBRID AI V2.0
           </div>
         </div>
 
@@ -249,26 +430,44 @@ export default function AiAssistantPage() {
           </div>
         </div>
 
-        {/* Bouton d'action */}
-        <button 
-          onClick={handleDeepAnalysis}
-          disabled={loading || !sqlToAnalyze}
-          style={{ 
-            background: loading ? '#334155' : 'linear-gradient(90deg, #8b5cf6, #6366f1)', 
-            color: 'white', padding: '14px 32px', border: 'none', 
-            borderRadius: '12px', cursor: loading ? 'not-allowed' : 'pointer', 
-            display: 'flex', alignItems: 'center', gap: '12px',
-            fontWeight: 700, transition: 'all 0.3s ease',
-            boxShadow: loading ? 'none' : '0 4px 15px rgba(139, 92, 246, 0.3)'
-          }}
-        >
-          {loading ? (
-            <Sparkles size={20} className="animate-spin" />
-          ) : (
-            <Zap size={20} fill="white" />
-          )}
-          {loading ? "L'IA analyse le plan d'exécution..." : "Lancer l'Expertise IA Tactique"}
-        </button>
+        {/* Boutons d'action */}
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <button 
+            onClick={handleDeepAnalysis}
+            disabled={loading || !sqlToAnalyze}
+            style={{ 
+              background: loading ? '#334155' : 'linear-gradient(90deg, #8b5cf6, #6366f1)', 
+              color: 'white', padding: '14px 32px', border: 'none', 
+              borderRadius: '12px', cursor: loading ? 'not-allowed' : 'pointer', 
+              display: 'flex', alignItems: 'center', gap: '12px',
+              fontWeight: 700, transition: 'all 0.3s ease',
+              boxShadow: loading ? 'none' : '0 4px 15px rgba(139, 92, 246, 0.3)'
+            }}
+          >
+            {loading ? (
+              <Sparkles size={20} className="animate-spin" />
+            ) : (
+              <Zap size={20} fill="white" />
+            )}
+            {loading ? "Analyse en cours..." : "Analyser SQL (Local)"}
+          </button>
+
+          <button 
+            onClick={() => runSecureAudit(selectedBase)}
+            disabled={loading || !selectedBase}
+            style={{ 
+              background: loading ? '#334155' : 'linear-gradient(90deg, #10b981, #059669)', 
+              color: 'white', padding: '14px 32px', border: 'none', 
+              borderRadius: '12px', cursor: loading ? 'not-allowed' : 'pointer', 
+              display: 'flex', alignItems: 'center', gap: '12px',
+              fontWeight: 700, transition: 'all 0.3s ease',
+              boxShadow: loading ? 'none' : '0 4px 15px rgba(16, 185, 129, 0.3)'
+            }}
+          >
+            <ShieldCheck size={20} />
+            {loading ? "Pipeline sécurisé en cours..." : "Audit Complet Sécurisé"}
+          </button>
+        </div>
 
         {/* Bouton de sauvegarde (affiché après analyse) */}
         {result && !loading && (
@@ -297,8 +496,11 @@ export default function AiAssistantPage() {
         )}
       </div>
 
+      {/* Pipeline Loader (visible pendant l'analyse) */}
+      {loading && <PipelineLoader currentStep={pipelineStep} />}
+
       {/* Résultats */}
-      {result && <AnalysisRenderer {...result} />}
+      {result && !loading && <AnalysisRenderer {...result} />}
     </div>
   );
 }
