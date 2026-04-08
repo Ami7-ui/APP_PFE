@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import api from '../api';
 import { Bot, Zap, Activity, Database, Sparkles, CheckCircle, Terminal, AlertTriangle, ShieldCheck, Lock, Cpu, Cloud, ArrowRight } from 'lucide-react';
 import AiResponseViewer from '../components/AiResponseViewer';
+import ReportViewer from '../components/ReportViewer';
 import useAppStore from '../store/useAppStore';
 
 const cardStyle = {
@@ -237,7 +238,7 @@ function AnalysisRenderer({ rapport_ia, analyse_ia, reponse, status, diagnostic_
 
 export default function AiAssistantPage() {
   const queryClient = useQueryClient();
-  const { aiState, setAiState } = useAppStore();
+  const { aiState, setAiState, auditState } = useAppStore();
   const { sqlToAnalyze, result, loading, pipelineStep, selectedBase } = aiState;
 
   // UI-only state (these reset when navigating away, which is fine)
@@ -340,10 +341,24 @@ export default function AiAssistantPage() {
   const handleSaveReport = async () => {
     if (!selectedBase || !result) return;
     setSaveLoading(true);
+
+    // Extraction propre pour le backend (évite d'envoyer un objet JSON non parsé)
+    let aiTextToSave = "";
+    if (typeof result === 'string') {
+        aiTextToSave = result;
+    } else if (result.rapport_ia?.texte_final) {
+        aiTextToSave = result.rapport_ia.texte_final;
+    } else if (result.diagnostic_local) {
+        aiTextToSave = `### 🧪 DIAGNOSTIC LOCAL\n${result.diagnostic_local}\n\n### 🚀 SOLUTIONS EXPERTES\n${result.solutions_expertes}`;
+    } else {
+        aiTextToSave = JSON.stringify(result, null, 2);
+    }
+
     try {
       await api.post('/api/reports/save', {
         id_base: parseInt(selectedBase),
-        ai_result: result
+        audit_data: auditState.result || {},
+        ai_analysis: aiTextToSave
       });
       setSaveSuccess(true);
       queryClient.invalidateQueries({ queryKey: ['reports'] });
@@ -499,7 +514,7 @@ export default function AiAssistantPage() {
       {/* Pipeline Loader (visible pendant l'analyse) */}
       {loading && <PipelineLoader currentStep={pipelineStep} />}
 
-      {/* Résultats */}
+      {/* Résultats de l'Analyse IA (Nvidia + LLaMA) */}
       {result && !loading && <AnalysisRenderer {...result} />}
     </div>
   );

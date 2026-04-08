@@ -5,11 +5,15 @@ from openai import OpenAI
 def serialize_audit_data(audit_data: dict) -> str:
     """
     Sérialise le dictionnaire d'audit complet (les 6 catégories) en une chaîne JSON.
+    Gère le cas où le dictionnaire reçu est le format consolidé {audit_data: ...}.
     """
     if not audit_data:
         return "{}"
     
-    return json.dumps(audit_data, ensure_ascii=False)
+    # Si on reçoit par erreur le format de stockage complet, on extrait les métriques
+    metrics = audit_data.get("audit_data", audit_data) if isinstance(audit_data, dict) else audit_data
+    
+    return json.dumps(metrics, ensure_ascii=False)
 
 
 def get_llama3_junior(context_data: str) -> str:

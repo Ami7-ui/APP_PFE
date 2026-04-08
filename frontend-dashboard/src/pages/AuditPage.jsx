@@ -200,6 +200,37 @@ export default function AuditPage() {
 
   const getSlaValue = (val) => val === undefined || val === null ? 'N/A' : val;
 
+  const formatSegmentData = (rawSegments) => {
+    if (!rawSegments || !Array.isArray(rawSegments)) return [];
+
+    const categories = {
+      "Segment de table": { value: 0, fill: '#10b981', types: ['TABLE', 'TABLE PARTITION', 'TABLE SUBPARTITION', 'NESTED TABLE'] },
+      "Segment d'index": { value: 0, fill: '#3b82f6', types: ['INDEX', 'INDEX PARTITION', 'INDEX SUBPARTITION'] },
+      "Segment de rollback": { value: 0, fill: '#f59e0b', types: ['ROLLBACK', 'TYPE2 UNDO'] },
+      "Segment temporaire": { value: 0, fill: '#8b5cf6', types: ['TEMPORARY'] },
+      "Segment de cluster": { value: 0, fill: '#ec4899', types: ['CLUSTER'] },
+      "Segment LOB": { value: 0, fill: '#06b6d4', types: ['LOBSEGMENT', 'LOBINDEX', 'LOB PARTITION'] },
+      "Autres": { value: 0, fill: '#94a3b8', types: [] }
+    };
+
+    rawSegments.forEach(s => {
+      const type = (s.type || (s.segment_type || '')).toUpperCase();
+      let found = false;
+      for (const [name, cat] of Object.entries(categories)) {
+        if (cat.types.includes(type)) {
+          cat.value += (s.mb || 0);
+          found = true;
+          break;
+        }
+      }
+      if (!found) categories["Autres"].value += (s.mb || 0);
+    });
+
+    return Object.entries(categories)
+      .filter(([_, cat]) => cat.value > 0)
+      .map(([name, cat]) => ({ name, value: Number(cat.value.toFixed(2)), fill: cat.fill }));
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -369,7 +400,7 @@ export default function AuditPage() {
                       <ResponsiveContainer width="100%" height="100%">
                          <PieChart>
                           <Pie 
-                            data={getMetric('storage').segments?.map(s => ({ name: s.type, value: s.mb, fill: s.type.includes('INDEX') ? '#3b82f6' : '#10b981' })) || []} 
+                            data={formatSegmentData(getMetric('storage').segments)} 
                             cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={2} dataKey="value" stroke="none">
                           </Pie>
                           <Tooltip />
@@ -484,14 +515,52 @@ export default function AuditPage() {
                         <div style={{ fontSize: '2rem', fontWeight: 800, color: '#f8fafc' }}>{getMetric('connections').failed_logons || 0}</div>
                       </div>
                    </div>
+                   <div style={{ flex: 1, background: 'rgba(15, 23, 42, 0.4)', borderRadius: 12, padding: 24, border: '1px solid rgba(16, 185, 129, 0.2)', display: 'flex', alignItems: 'center', gap: 20 }}>
+                      <div style={{ background: 'rgba(16, 185, 129, 0.1)', padding: 16, borderRadius: '50%' }}><Users size={32} color="#10b981" /></div>
+                      <div>
+                        <div style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: 4 }}>Total Sessions Actives</div>
+                        <div style={{ fontSize: '2rem', fontWeight: 800, color: '#f8fafc' }}>{getMetric('connections').active_sessions_details?.length || 0}</div>
+                      </div>
+                   </div>
                 </div>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#f8fafc', marginBottom: 16 }}>État des Sessions Actuelles</h3>
-                <div style={{ display: 'flex', gap: 16 }}>
-                    {Object.entries(getMetric('connections').status || {}).map(([status, count]) => (
-                        <div key={status} style={{ padding: '12px 20px', background: 'rgba(255,255,255,0.05)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.1)' }}>
-                            <span style={{ color: '#94a3b8', fontSize: '0.8rem' }}>{status}:</span> <span style={{ color: '#f8fafc', fontWeight: 800 }}>{count}</span>
-                        </div>
-                    ))}
+
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#f8fafc', marginBottom: 16 }}>Détails des Sessions Actives</h3>
+                <div style={{ 
+                  maxHeight: '400px', 
+                  overflowY: 'auto', 
+                  borderRadius: 12, 
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  background: 'rgba(15, 23, 42, 0.2)'
+                }}>
+                  <table className="og-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead style={{ position: 'sticky', top: 0, background: 'rgba(15, 23, 42, 1)', zIndex: 1 }}>
+                      <tr>
+                        {['SID', 'Utilisateur', 'Machine', 'Programme', 'Logon Time'].map(h => (
+                          <th key={h} style={{ textAlign: 'left', padding: '12px 16px', color: '#94a3b8', fontSize: '0.85rem' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {getMetric('connections').active_sessions_details?.length > 0 ? (
+                        getMetric('connections').active_sessions_details.map((s, i) => (
+                          <tr key={i} style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                            <td style={{ padding: '12px 16px', color: '#38bdf8', fontWeight: 700 }}>{s.sid}</td>
+                            <td style={{ padding: '12px 16px' }}>
+                              <div style={{ color: '#e2e8f0', fontWeight: 600 }}>{s.username || 'System'}</div>
+                              <div style={{ color: '#64748b', fontSize: '0.75rem' }}>{s.osuser}</div>
+                            </td>
+                            <td style={{ padding: '12px 16px', color: '#94a3b8', fontSize: '0.85rem' }}>{s.machine}</td>
+                            <td style={{ padding: '12px 16px', color: '#94a3b8', fontSize: '0.85rem' }}>{s.program}</td>
+                            <td style={{ padding: '12px 16px', color: '#10b981', fontSize: '0.85rem' }}>{s.logon_time}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan="5" style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>Aucune session active détectée.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             )}

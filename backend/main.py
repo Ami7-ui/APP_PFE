@@ -76,7 +76,8 @@ class AuditAnalysisRequest(BaseModel):
 
 class ReportSaveRequest(BaseModel):
     id_base: int
-    ai_result: dict
+    audit_data: dict
+    ai_analysis: str
 
 # ── ROUTES AUTHENTIFICATION ───────────────────────────────────────────────────
 
@@ -271,8 +272,8 @@ def get_reports(nom_base: str = Query(..., alias="nom_base_cible")):
 
 @app.post("/api/reports/save")
 async def save_report(req: ReportSaveRequest):
-    """ Génère et enregistre un rapport PDF """
-    ok, msg = db_functions.save_audit_report(req.id_base, req.ai_result)
+    """ Génère et enregistre un rapport PDF consolé (Métriques + IA) """
+    ok, msg = db_functions.save_audit_report(req.id_base, req.audit_data, req.ai_analysis)
     if not ok: raise HTTPException(status_code=500, detail=msg)
     return {"message": msg}
 
@@ -282,6 +283,13 @@ async def delete_report(id_audit: int):
     ok, msg = db_functions.delete_audit_report(id_audit)
     if not ok: raise HTTPException(status_code=400, detail=msg)
     return {"message": msg}
+
+@app.get("/api/reports/{id_audit}/data")
+async def get_report_data(id_audit: int):
+    """ Récupère les données brutes et l'analyse IA d'un rapport historique """
+    data, error = db_functions.get_report_data(id_audit)
+    if error: raise HTTPException(status_code=404, detail=error)
+    return data
 
 @app.get("/api/reports/{id_audit}/download")
 async def download_report(id_audit: int):

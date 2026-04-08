@@ -682,25 +682,87 @@ class AuditPDF(FPDF):
         self.cell(0, 10, f"  {title}", 0, 1, 'L', True)
         self.ln(5)
 
+    def format_data_recursive(self, data, indent=0):
+        """
+        Formate proprement un dictionnaire ou une liste en arborescence textuelle
+        sans accolades, crochets ou guillemets.
+        """
+        result = ""
+        prefix = "  " * indent
+        
+        if isinstance(data, dict):
+            for k, v in data.items():
+                if isinstance(v, (dict, list)):
+                    result += f"{prefix}{k} :\n"
+                    result += self.format_data_recursive(v, indent + 1)
+                else:
+                    result += f"{prefix}{k} : {v}\n"
+        elif isinstance(data, list):
+            for item in data:
+                if isinstance(item, (dict, list)):
+                    result += f"{prefix}- \n"
+                    result += self.format_data_recursive(item, indent + 1)
+                else:
+                    result += f"{prefix}- {item}\n"
+        else:
+            result += f"{prefix}{data}\n"
+        return result
+
     def chapter_body(self, body):
-        # 1. Nettoyage des emojis (FPDF ne supporte pas l'UTF-8 étendu nativement)
+        # 1. Nettoyage des emojis
         body = body.encode('latin-1', 'ignore').decode('latin-1')
         
-        # 2. Parsing du Markdown pour les blocs SQL (```sql ... ```)
+        # 2. Parsing des blocs SQL
         parts = re.split(r'```(?:sql)?\s*([\s\S]*?)```', body)
+        
         for i, part in enumerate(parts):
             if i % 2 == 1:
-                # Bloc de code
+                # BLOC SQL
                 self.set_font('Courier', '', 10)
-                self.set_text_color(220, 38, 38) # Rouge
+                self.set_text_color(220, 38, 38)
                 self.set_fill_color(248, 250, 252)
-                self.multi_cell(0, 7, part, border=1, fill=True)
+                self.multi_cell(0, 6, part.strip(), border=1, fill=True)
+                self.ln(2)
             else:
-                # Texte normal
-                self.set_font('helvetica', '', 11)
-                self.set_text_color(51, 65, 85)
-                self.multi_cell(0, 7, part)
-        self.ln(5)
+                # TEXTE NORMAL & MARKDOWN
+                lines = part.split('\n')
+                for line in lines:
+                    if not line.strip():
+                        self.ln(2)
+                        continue
+                        
+                    # 1. TITRES (###)
+                    if line.strip().startswith('###'):
+                        self.set_font('helvetica', 'B', 14)
+                        self.set_text_color(30, 41, 59)
+                        self.multi_cell(0, 10, line.replace('###', '').strip())
+                        self.ln(1)
+                        continue
+                    
+                    # 2. LISTES (* ou -)
+                    is_list = False
+                    if line.strip().startswith(('*', '-')):
+                        is_list = True
+                        self.set_x(self.get_x() + 5)
+                        line = " " + line.strip()
+                    
+                    # 3. GRAS (**text**) INTERNE
+                    self.set_font('helvetica', '', 11)
+                    self.set_text_color(51, 65, 85)
+                    
+                    # On utilise write() pour gérer les changements de styles sur une ligne
+                    fragments = re.split(r'(\*\*.*?\*\*)', line)
+                    for frag in fragments:
+                        if frag.startswith('**') and frag.endswith('**'):
+                            self.set_font('helvetica', 'B', 11)
+                            clean_frag = frag.replace('**', '')
+                            self.write(7, clean_frag)
+                        else:
+                            self.set_font('helvetica', '', 11)
+                            self.write(7, frag)
+                    
+                    self.ln(7) # Retour à la ligne après chaque ligne de texte
+        self.ln(2)
 
 def executer_audit_complet(id_base):
     """
@@ -767,6 +829,32 @@ def executer_audit_complet(id_base):
             
             cursor.execute("SELECT VALUE FROM v$sysstat WHERE NAME = 'logons (failed)'")
             connections["failed_logons"] = cursor.fetchone()[0] or 0
+
+            # Détails sessions actives (Oracle uniquement)
+            if db_type == "ORACLE":
+                cursor.execute("""
+                    SELECT SID, SERIAL#, USERNAME, OSUSER, MACHINE, PROGRAM, 
+                           TO_CHAR(LOGON_TIME, 'YYYY-MM-DD HH24:MI:SS') as LOGON_TIME 
+                    FROM V$SESSION 
+                    WHERE STATUS = 'ACTIVE' AND TYPE != 'BACKGROUND'
+                """)
+                connections["active_sessions_details"] = [
+                    {
+                        "sid": r[0], "serial": r[1], "username": r[2], 
+                        "osuser": r[3], "machine": r[4], "program": r[5], 
+                        "logon_time": r[6]
+                    } for r in cursor.fetchall()
+                ]
+            else:
+                # Fallback MySQL (approximation)
+                cursor.execute("SELECT ID, USER, HOST, DB, COMMAND, TIME, STATE FROM information_schema.processlist WHERE COMMAND != 'Sleep'")
+                connections["active_sessions_details"] = [
+                    {
+                        "sid": r[0], "serial": 0, "username": r[1], 
+                        "osuser": "N/A", "machine": r[2], "program": r[4], 
+                        "logon_time": str(r[5]) + "s"
+                    } for r in cursor.fetchall()
+                ]
         except: connections["error"] = "Connections fail"
 
         # 5. RÉPLICATION / HA
@@ -802,63 +890,44 @@ def executer_audit_complet(id_base):
         if conn: conn.close()
         return False, str(e), None
 
-def save_audit_report(id_base, ai_analysis_result):
+def save_audit_report(id_base, audit_data, ai_analysis_string):
     """
     Génère un PDF en mémoire (BytesIO) et l'insère dans la colonne BLOB 'fichier_pdf'.
-    Utilise les 6 catégories pour un audit exhaustif.
-    """
-    # 1. Récupérer les données complètes de l'audit (6 catégories)
-    ok, msg, audit_data = executer_audit_complet(id_base)
-    if not ok: return False, f"Échec extraction données : {msg}"
-    
+    Utilise les données brutes (audit_data) et l'analyse IA (string).
+    """    
     # Récupérer le nom humain de la base
     creds = get_target_credentials(id_base)
     nom_base = creds[4] if creds else f"Base_{id_base}"
     
-    # 2. Préparer la structure du PDF
+    # Préparer la structure du PDF
     pdf = AuditPDF()
     pdf.alias_nb_pages()
     pdf.add_page()
     
-    # Section : Infos Instance
-    pdf.chapter_title("1. Informations de l'Instance")
-    version_txt = f"Base de données : {nom_base}\n"
-    pdf.chapter_body(version_txt)
+    # Section 1 : Informations
+    pdf.chapter_title("1. Général - Informations de l'Instance")
+    pdf.chapter_body(f"Base de données cible : {nom_base}\nDate de génération : {datetime.datetime.now().strftime('%d/%m/%Y à %H:%M')}")
     
-    # Section : Performance (Extraction depuis le format dict complet)
-    pdf.chapter_title("2. Performance & Ressources (Synthèse)")
-    perf = audit_data.get('performance', {})
-    cpu = perf.get('cpu', {}).get('busy_pct', 0)
-    ram = perf.get('ram', {}).get('ram_pct', 0)
-    perf_txt = f"Utilisation CPU : {cpu}%\n"
-    perf_txt += f"Utilisation RAM : {ram}%\n"
-    perf_txt += f"IOPS Lecture : {perf.get('iops_reads', 0)} | IOPS Écriture : {perf.get('iops_writes', 0)}"
-    pdf.chapter_body(perf_txt)
-    
-    # Section : Stockage & Requêtes (Bref aperçu avant l'IA)
-    pdf.chapter_title("3. Métriques Critiques (Stockage & Sessions)")
-    storage = audit_data.get('storage', {})
-    conn_data = audit_data.get('connections', {})
-    synth_txt = f"Espace total : {storage.get('total_gb', 0)} Go | Libre : {storage.get('free_gb', 0)} Go\n"
-    synth_txt += f"Sessions : {conn_data.get('status', {}).get('ACTIVE', 0)} actives / {sum(conn_data.get('status', {}).values()) if isinstance(conn_data.get('status'), dict) else 0} totales\n"
-    pdf.chapter_body(synth_txt)
+    # Section 2 : Métriques brutes (itération sur le JSON)
+    pdf.chapter_title("2. Données Brutes de l'Audit")
+    for categorie, data in audit_data.items():
+        if isinstance(data, dict) and not 'error' in data:
+            pdf.set_font('helvetica', 'B', 12)
+            # Sous-titre
+            pdf.set_text_color(14, 165, 233)
+            pdf.cell(0, 10, f"--> METRIQUES : {str(categorie).upper()}", 0, 1, 'L')
+            
+            # Formatage récursif propre
+            clean_metrics = pdf.format_data_recursive(data)
+            pdf.chapter_body(clean_metrics)
+            pdf.ln(2)
 
-    # Section : Audit IA
+    # Séparateur et nouvelle page
     pdf.add_page()
-    pdf.chapter_title("4. Expertise IA (Diagnostic & Optimisation)")
-    ai_content = ai_analysis_result.get('rapport_ia', ai_analysis_result)
     
-    if isinstance(ai_content, dict) and 'texte_final' in ai_content:
-        # Nouveau pipeline : Texte Final Unifié
-        pdf.chapter_body(ai_content['texte_final'])
-    elif isinstance(ai_content, dict):
-        # Fallback ancienne structure
-        diag = ai_content.get('diagnostic_local', "N/A")
-        sol = ai_content.get('solutions_expertes', "N/A")
-        pdf.chapter_body(f"### 🧪 DIAGNOSTIC LOCAL\n{diag}\n\n### 🚀 SOLUTIONS EXPERTES\n{sol}")
-    else:
-        pdf.chapter_body(str(ai_content))
-
+    # Section 3 : Expertise IA
+    pdf.chapter_title("3. Expertise IA Complète (LLaMA + Nvidia)")
+    pdf.chapter_body(ai_analysis_string)
 
     # Génération binaire spécifique pour fpdf 1.7.2
     pdf_string = pdf.output(dest='S')
@@ -870,27 +939,29 @@ def save_audit_report(id_base, ai_analysis_result):
         cursor = conn.cursor()
         # Déclaration explicite du type BLOB et CLOB (pour le JSON) pour garantir le stockage
         cursor.setinputsizes(None, oracledb.DB_TYPE_BLOB, oracledb.DB_TYPE_CLOB)
-        
+
         import json
-        audit_json_str = json.dumps(audit_data, ensure_ascii=False)
+        report_storage = {
+            "audit_data": audit_data,
+            "ai_analysis": ai_analysis_string
+        }
+        report_json_str = json.dumps(report_storage, ensure_ascii=False)
         
         try:
-            # 4.1 Tentative avec le JSON (Nouvelle colonne)
+            # 4.1 Tentative avec le JSON
             sql_insert = "INSERT INTO historiques_audits (date_generation, nom_base_cible, fichier_pdf, donnees_json_brutes) VALUES (CURRENT_TIMESTAMP, :1, :2, :3)"
-            cursor.execute(sql_insert, [nom_base, pdf_bytes, audit_json_str])
+            cursor.execute(sql_insert, [nom_base, pdf_bytes, report_json_str])
         except oracledb.Error as e:
             if "ORA-00904" in str(e):
-                print(f"[WARNING] Colonne 'donnees_json_brutes' manquante. Sauvegarde du PDF uniquement.")
-                # Fallback : Insertion sans le JSON pour ne pas bloquer l'utilisateur
+                print(f"[WARNING] Colonne 'donnees_json_brutes' manquante.")
                 cursor.setinputsizes(None, oracledb.DB_TYPE_BLOB)
                 sql_insert_fallback = "INSERT INTO historiques_audits (date_generation, nom_base_cible, fichier_pdf) VALUES (CURRENT_TIMESTAMP, :1, :2)"
                 cursor.execute(sql_insert_fallback, [nom_base, pdf_bytes])
             else:
                 raise e
         
-        print(f"[DEBUG] Taille du PDF généré : {len(pdf_bytes)} octets")
         conn.commit()
-        return True, "Rapport archivé avec succès en base de données (BLOB)."
+        return True, "Rapport archivé avec succès (PDF + JSON)."
     except Exception as e:
         print(f"[ERROR] Échec insertion BLOB : {e}")
         return False, f"Erreur lors de l'archivage BLOB : {e}"
@@ -914,6 +985,35 @@ def get_report_blob(id_audit):
     finally:
         if 'conn' in locals() and conn: conn.close()
 
+def get_report_data(id_audit):
+    """
+    Récupère le JSON consolidé d'un rapport.
+    """
+    conn = get_oracle_connection()
+    if not conn: return None, "Connexion BD impossible"
+    try:
+        cursor = conn.cursor()
+        sql = "SELECT donnees_json_brutes, date_generation, nom_base_cible FROM historiques_audits WHERE id_audit = :1"
+        cursor.execute(sql, (id_audit,))
+        row = cursor.fetchone()
+        if not row: return None, "Document introuvable"
+        
+        import json
+        json_data = row[0].read() if hasattr(row[0], 'read') else str(row[0])
+        parsed = json.loads(json_data) if json_data else {}
+        
+        # Compatibilité avec l'ancienne structure si ai_analysis n'est pas à la racine
+        return {
+            "audit_data": parsed.get("audit_data", parsed),
+            "ai_response": parsed.get("ai_analysis", ""),
+            "date": row[1].isoformat() if hasattr(row[1], 'isoformat') else str(row[1]),
+            "base": row[2]
+        }, None
+    except Exception as e:
+        return None, f"Erreur lecture JSON : {e}"
+    finally:
+        if 'conn' in locals() and conn: conn.close()
+
 def delete_audit_report(id_audit):
     """ Supprime un rapport archivé de la base de données. """
     conn = get_oracle_connection()
@@ -930,6 +1030,7 @@ def delete_audit_report(id_audit):
 def get_last_audit_data(id_base):
     """
     Récupère le JSON brut de l'audit précédent pour cette base, s'il existe.
+    Gère le format consolidé (audit_data) ou l'ancien format (racine).
     """
     creds = get_target_credentials(id_base)
     if not creds: return None
@@ -953,10 +1054,13 @@ def get_last_audit_data(id_base):
         
         import json
         json_str = row[0].read() if hasattr(row[0], 'read') else str(row[0])
-        return json.loads(json_str)
+        parsed = json.loads(json_str) if json_str else {}
+        
+        # Extraire uniquement les métriques (audit_data) si c'est le nouveau format
+        return parsed.get("audit_data", parsed)
     except Exception as e:
         if "ORA-00904" in str(e):
-            print(f"[DEBUG] Colonne 'donnees_json_brutes' absente. Comparaison historique désactivée.")
+            print(f"[DEBUG] Colonne 'donnees_json_brutes' absente.")
         else:
             print(f"[DEBUG] Erreur get_last_audit_data : {e}")
         return None

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../api';
-import { FileText, Calendar, Clock, Download, Database, Search, ArrowRight, ExternalLink, Trash2 } from 'lucide-react';
+import { FileText, Calendar, Clock, Download, Database, Search, ArrowRight, ExternalLink, Trash2, Eye, X } from 'lucide-react';
+import ReportViewer from '../components/ReportViewer';
 
 const cardStyle = {
   background: 'rgba(30, 41, 59, 0.4)',
@@ -31,6 +32,31 @@ export default function ReportsHistoryPage() {
   const queryClient = useQueryClient();
   const [selectedBase, setSelectedBase] = useState("");
   const [bases, setBases] = useState([]);
+  
+  // États pour la modale de visualisation
+  const [viewingReport, setViewingReport] = useState(null);
+  const [reportData, setReportData] = useState(null);
+  const [loadingData, setLoadingData] = useState(false);
+
+  const handleViewReport = async (report) => {
+    setViewingReport(report);
+    setLoadingData(true);
+    setReportData(null);
+    try {
+      const res = await api.get(`/api/reports/${report.id}/data`);
+      setReportData(res.data);
+    } catch (err) {
+      alert("Impossible de charger les données du rapport.");
+      setViewingReport(null);
+    } finally {
+      setLoadingData(false);
+    }
+  };
+
+  const closeView = () => {
+    setViewingReport(null);
+    setReportData(null);
+  };
 
   // --- NOUVELLE FONCTION DE SUPPRESSION ---
   const handleReportDelete = async (id) => {
@@ -170,19 +196,32 @@ export default function ReportsHistoryPage() {
               </div>
 
               <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                <button 
+                  onClick={() => handleViewReport(report)}
+                  style={{ 
+                    flex: 1,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                    padding: '12px', borderRadius: '10px', background: 'rgba(56, 189, 248, 0.1)',
+                    color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.2)',
+                    fontWeight: 700, fontSize: '0.9rem', cursor: 'pointer',
+                    transition: 'all 0.3s ease'
+                  }}
+                >
+                  <Eye size={18} /> Consulter
+                </button>
                 <a 
                   href={`http://localhost:8000/api/reports/${report.id}/download`} 
                   target="_blank" 
                   rel="noopener noreferrer"
                   style={{ 
                     flex: 1,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
                     padding: '12px', borderRadius: '10px', background: 'linear-gradient(90deg, #0ea5e9, #2563eb)',
                     color: 'white', fontWeight: 700, fontSize: '0.9rem', textDecoration: 'none',
                     transition: 'all 0.3s ease', boxShadow: '0 4px 15px rgba(14, 165, 233, 0.2)'
                   }}
                 >
-                  Ouvrir <ExternalLink size={16} />
+                  PDF <Download size={16} />
                 </a>
                 <button 
                   onClick={() => handleReportDelete(report.id)}
@@ -200,6 +239,74 @@ export default function ReportsHistoryPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* MODALE DE VISUALISATION DÉTAILLÉE */}
+      {viewingReport && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(2, 6, 17, 0.9)', backdropFilter: 'blur(8px)',
+          zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '40px'
+        }}>
+          <div style={{
+            width: '100%', maxWidth: '1200px', maxHeight: '90vh',
+            background: '#0c0d0d', borderRadius: '24px', position: 'relative',
+            display: 'flex', flexDirection: 'column', border: '1px solid rgba(255,255,255,0.05)',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
+          }}>
+            {/* Header Modale */}
+            <div style={{
+              padding: '20px 30px', borderBottom: '1px solid rgba(255,255,255,0.05)',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+            }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800 }}>Détails de l'Audit #{viewingReport.id}</h2>
+                <div style={{ fontSize: '0.8rem', color: '#64748b' }}>Version consolidée interactive</div>
+              </div>
+              <button 
+                onClick={closeView}
+                style={{
+                  width: '40px', height: '40px', borderRadius: '12px',
+                  background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)',
+                  color: '#94a3b8', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Corps Modale Scrollable */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '30px' }}>
+              {loadingData ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '100px 0', gap: '20px' }}>
+                  <Activity size={48} color="#0ea5e9" className="animate-spin" />
+                  <p style={{ color: '#94a3b8' }}>Chargement des données brutes et de l'expertise IA...</p>
+                </div>
+              ) : reportData ? (
+                <ReportViewer data={reportData} isHistorical={true} />
+              ) : (
+                <div style={{ textAlign: 'center', padding: '100px 0', color: '#ef4444' }}>
+                  Échec de la récupération des données.
+                </div>
+              )}
+            </div>
+            
+            {/* Footer Modale */}
+            <div style={{
+              padding: '20px 30px', borderTop: '1px solid rgba(255,255,255,0.05)',
+              display: 'flex', justifyContent: 'flex-end', gap: '15px'
+            }}>
+                <button onClick={closeView} style={{ padding: '10px 25px', borderRadius: '10px', background: 'transparent', border: '1px solid #334155', color: '#94a3b8', cursor: 'pointer' }}>Fermer</button>
+                <a 
+                  href={`http://localhost:8000/api/reports/${viewingReport.id}/download`} 
+                  style={{ padding: '10px 25px', borderRadius: '10px', background: '#0ea5e9', color: 'white', textDecoration: 'none', fontWeight: 600 }}
+                >
+                  Télécharger PDF
+                </a>
+            </div>
+          </div>
         </div>
       )}
 
