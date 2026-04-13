@@ -824,8 +824,15 @@ def executer_audit_complet(id_base):
         # 4. CONNEXIONS
         connections = {}
         try:
-            cursor.execute("SELECT STATUS, COUNT(*) FROM v$session GROUP BY STATUS")
+            cursor.execute("SELECT STATUS, COUNT(*) FROM v$session WHERE USERNAME IS NOT NULL GROUP BY STATUS")
             connections["status"] = {row[0]: row[1] for row in cursor.fetchall()}
+            
+            # Sessions bloquées
+            try:
+                cursor.execute("SELECT COUNT(*) FROM v$session WHERE blocking_session IS NOT NULL")
+                connections["blocked"] = cursor.fetchone()[0] or 0
+            except:
+                connections["blocked"] = 0
             
             cursor.execute("SELECT VALUE FROM v$sysstat WHERE NAME = 'logons (failed)'")
             connections["failed_logons"] = cursor.fetchone()[0] or 0
@@ -836,7 +843,7 @@ def executer_audit_complet(id_base):
                     SELECT SID, SERIAL#, USERNAME, OSUSER, MACHINE, PROGRAM, 
                            TO_CHAR(LOGON_TIME, 'YYYY-MM-DD HH24:MI:SS') as LOGON_TIME 
                     FROM V$SESSION 
-                    WHERE STATUS = 'ACTIVE' AND TYPE != 'BACKGROUND'
+                    WHERE USERNAME IS NOT NULL AND STATUS = 'ACTIVE'
                 """)
                 connections["active_sessions_details"] = [
                     {

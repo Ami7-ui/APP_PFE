@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api';
 import GlassCard from '../components/GlassCard';
-import { FileCode2, Code2, Plus, Edit2, Trash2, Save, X, Terminal, Database, Filter } from 'lucide-react';
+import ScriptsMetriques from '../components/ScriptsMetriques';
+import { FileCode2, Code2, Plus, Edit2, Trash2, Save, X, Terminal, Database, Filter, Archive } from 'lucide-react';
 
 export default function ScriptsPage() {
   const [scripts, setScripts] = useState([]);
@@ -80,6 +81,10 @@ export default function ScriptsPage() {
           </div>
         </div>
       </GlassCard>
+
+      <div style={{ marginBottom: 24 }}>
+        <ScriptsMetriques />
+      </div>
 
       <div className="grid-2" style={{ gridTemplateColumns: '1fr 1fr' }}>
         <GlassCard>

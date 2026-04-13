@@ -127,7 +127,14 @@ export default function AuditPage() {
         mock: mockDataMetrics,
         cpu: { busy_pct: 35.5, idle_pct: 64.5, history: [{User: 'SYS', CPU: 42}, {User: 'APP_USER', CPU: 12}] },
         ram: { used_mb: 4500, max_mb: 8000, ram_pct: 56.2, pga_total_mb: 1500, sga_total_mb: 3000, sga_detail: [{Composant: 'Shared Pool', Mo: 800}, {Composant: 'Buffer Cache', Mo: 2000}] },
-        session: [{SID: 101, 'SERIAL#': 452, USERNAME: 'SYS', STATUS: 'ACTIVE', MACHINE: 'APPSVR01'}, {SID: 102, 'SERIAL#': 892, USERNAME: 'APP_USER', STATUS: 'INACTIVE', MACHINE: 'DBCLI01'}],
+        connections: {
+          active_sessions_details: [
+            {sid: 101, serial: 452, username: 'SYS', status: 'ACTIVE', machine: 'APPSVR01', osuser: 'oracle', program: 'sqlplus', logon_time: '2024-03-20 10:00:00'},
+            {sid: 102, serial: 892, username: 'APP_USER', status: 'INACTIVE', machine: 'DBCLI01', osuser: 'appuser', program: 'JDBC', logon_time: '2024-03-20 11:30:00'}
+          ],
+          status: { ACTIVE: 1, INACTIVE: 1 },
+          failed_logons: 2
+        },
         sql: [] 
       });
       setTab('performance');
@@ -497,8 +504,37 @@ export default function AuditPage() {
                 {loadingPlan && <div style={{ marginTop: '20px', color: '#8b5cf6' }}><Activity className="animate-spin" size={18} /> Planification...</div>}
                 {selectedPlan && !loadingPlan && (
                   <div style={{ marginTop: '25px', background: '#0f172a', borderRadius: '12px', border: '1px solid #1e293b' }}>
-                    {/* ... (Plan Execution Table omitted for brevity or identical to previous) */}
-                    <div style={{ padding: 20, color: '#94a3b8', fontSize: '0.9rem' }}>Plan chargé pour {activeSqlId}.</div>
+                    <div style={{ maxHeight: '350px', overflowY: 'auto' }}>
+                      <table className="og-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead style={{ position: 'sticky', top: 0, background: '#0f172a', zIndex: 1 }}>
+                          <tr>
+                            {['ID', 'Opération', 'Objet', 'Lignes', 'Coût', 'Temps'].map(h => (
+                              <th key={h} style={{ textAlign: 'left', padding: '12px 16px', color: '#64748b', fontSize: '0.75rem', textTransform: 'uppercase' }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Array.isArray(selectedPlan) && selectedPlan.length > 0 ? selectedPlan.map((step, idx) => (
+                            <tr key={idx} style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                              <td style={{ padding: '10px 16px', color: '#64748b', fontSize: '0.8rem' }}>{step.id}</td>
+                              <td style={{ padding: '10px 16px', whiteSpace: 'pre', fontFamily: 'monospace', color: '#e2e8f0', fontSize: '0.85rem' }}>{step.operation}</td>
+                              <td style={{ padding: '10px 16px', color: '#38bdf8', fontSize: '0.85rem' }}>{step.name}</td>
+                              <td style={{ padding: '10px 16px', color: '#cbd5e1' }}>{step.rows}</td>
+                              <td style={{ padding: '10px 16px', color: '#f59e0b', fontWeight: 600 }}>{step.cost}</td>
+                              <td style={{ padding: '10px 16px', color: '#10b981' }}>{step.time}</td>
+                            </tr>
+                          )) : (
+                            <tr>
+                              <td colSpan="6" style={{ padding: '20px', textAlign: 'center', color: '#64748b' }}>Aucun détail de plan disponible.</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div style={{ padding: '12px 20px', borderTop: '1px solid rgba(255,255,255,0.05)', color: '#64748b', fontSize: '0.75rem', display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Source: V$SQL_PLAN</span>
+                      <span>ID SQL: {activeSqlId}</span>
+                    </div>
                   </div>
                 )}
               </div>
@@ -519,7 +555,7 @@ export default function AuditPage() {
                       <div style={{ background: 'rgba(16, 185, 129, 0.1)', padding: 16, borderRadius: '50%' }}><Users size={32} color="#10b981" /></div>
                       <div>
                         <div style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: 4 }}>Total Sessions Actives</div>
-                        <div style={{ fontSize: '2rem', fontWeight: 800, color: '#f8fafc' }}>{getMetric('connections').active_sessions_details?.length || 0}</div>
+                        <div style={{ fontSize: '2rem', fontWeight: 800, color: '#f8fafc' }}>{getMetric('connections').status?.ACTIVE || 0}</div>
                       </div>
                    </div>
                 </div>

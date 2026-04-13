@@ -1,10 +1,12 @@
 # backend/main.py
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response, UploadFile, File
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, List
+import zipfile
+import io
 import db_functions
 import ai_service
 import ollama
@@ -222,6 +224,34 @@ def add_script(req: ScriptRequest):
     ok, msg = db_functions.ajouter_metrique(req.Nom_Scripte, req.Contenu_Script, req.id_type_base, req.id_type_metrique)
     if not ok: raise HTTPException(status_code=400, detail=msg)
     return {"message": msg}
+
+@app.post("/api/scripts/upload-zip")
+async def upload_scripts_zip(file: UploadFile = File(...)):
+    if not file.filename.endswith('.zip'):
+        raise HTTPException(status_code=400, detail="Seuls les fichiers .zip sont acceptés")
+    
+    scripts = []
+    try:
+        # Lecture du contenu du fichier en RAM
+        contents = await file.read()
+        zip_buffer = io.BytesIO(contents)
+        
+        with zipfile.ZipFile(zip_buffer, 'r') as z:
+            for filename in z.namelist():
+                # Ignorer les dossiers et les fichiers non-SQL
+                if filename.endswith('.sql') and not filename.startswith('__MACOSX'):
+                    with z.open(filename) as f:
+                        sql_content = f.read().decode('utf-8')
+                        # Utiliser le nom du fichier sans le chemin complet si nécessaire
+                        clean_name = filename.split('/')[-1]
+                        scripts.append({
+                            "nom": clean_name,
+                            "sql": sql_content
+                        })
+        
+        return {"message": "succès", "scripts": scripts}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur lors de l'extraction : {str(e)}")
 
 # ── ASSISTANT IA & ANALYSE AVANCÉE ────────────────────────────────────────────
 
