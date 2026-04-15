@@ -126,7 +126,11 @@ export default function AuditPage() {
       setResult({ 
         mock: mockDataMetrics,
         cpu: { busy_pct: 35.5, idle_pct: 64.5, history: [{User: 'SYS', CPU: 42}, {User: 'APP_USER', CPU: 12}] },
-        ram: { used_mb: 4500, max_mb: 8000, ram_pct: 56.2, pga_total_mb: 1500, sga_total_mb: 3000, sga_detail: [{Composant: 'Shared Pool', Mo: 800}, {Composant: 'Buffer Cache', Mo: 2000}] },
+        ram: { 
+          used_mb: 4500, max_mb: 8000, ram_pct: 56.2, pga_total_mb: 1500, sga_total_mb: 3000, 
+          sga_detail: [{Composant: 'Buffer Cache', Mo: 2000}, {Composant: 'Shared Pool', Mo: 800}, {Composant: 'Large Pool', Mo: 200}],
+          pga_detail: [{Composant: 'Sql Workarea', Mo: 1000}, {Composant: 'Session Memory', Mo: 500}] 
+        },
         connections: {
           active_sessions_details: [
             {sid: 101, serial: 452, username: 'SYS', status: 'ACTIVE', machine: 'APPSVR01', osuser: 'oracle', program: 'sqlplus', logon_time: '2024-03-20 10:00:00'},
@@ -161,7 +165,7 @@ export default function AuditPage() {
     } catch (err) {
       console.error("Erreur plan d'exécution:", err);
       // Fallback
-      setSelectedPlan([]);
+      setSelectedPlan('');
     } finally {
       setLoadingPlan(false);
     }
@@ -341,6 +345,53 @@ export default function AuditPage() {
                           </PieChart>
                         </ResponsiveContainer>
                       </div>
+
+                      {/* SGA / PGA Details Table */}
+                      <div style={{ marginTop: '20px', display: 'flex', gap: '15px' }}>
+                        {getMetric('performance').ram.sga_detail && getMetric('performance').ram.sga_detail.length > 0 && (
+                          <div style={{ flex: 1, background: 'rgba(16, 185, 129, 0.05)', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.1)', padding: '12px' }}>
+                            <div style={{ color: '#10b981', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '8px', textTransform: 'uppercase' }}>Composants SGA</div>
+                            <div style={{ maxHeight: '120px', overflowY: 'auto' }}>
+                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                                <tbody>
+                                  {getMetric('performance').ram.sga_detail.filter(item => !item.Composant.includes('Total') && !item.Composant.includes('Maximum')).slice(0, 5).map((item, i) => (
+                                    <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                      <td style={{ color: '#cbd5e1', padding: '4px 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100px' }} title={item.Composant}>{item.Composant}</td>
+                                      <td style={{ color: '#f8fafc', padding: '4px 0', textAlign: 'right', fontWeight: 'bold' }}>{item.Mo} <span style={{color: '#64748b', fontWeight: 'normal', fontSize: '0.7rem'}}>Mo</span></td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                            <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(16, 185, 129, 0.2)', display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', fontWeight: 'bold' }}>
+                              <span style={{ color: '#10b981' }}>Total SGA</span>
+                              <span style={{ color: '#f8fafc' }}>{getMetric('performance').ram.sga_total_mb} <span style={{ color: '#64748b', fontSize: '0.75rem', fontWeight: 'normal' }}>Mo</span></span>
+                            </div>
+                          </div>
+                        )}
+
+                        {getMetric('performance').ram.pga_detail && getMetric('performance').ram.pga_detail.length > 0 && (
+                          <div style={{ flex: 1, background: 'rgba(139, 92, 246, 0.05)', borderRadius: '8px', border: '1px solid rgba(139, 92, 246, 0.1)', padding: '12px' }}>
+                           <div style={{ color: '#8b5cf6', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '8px', textTransform: 'uppercase' }}>Composants PGA</div>
+                            <div style={{ maxHeight: '120px', overflowY: 'auto' }}>
+                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                                <tbody>
+                                  {getMetric('performance').ram.pga_detail.slice(0, 5).map((item, i) => (
+                                    <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                      <td style={{ color: '#cbd5e1', padding: '4px 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100px' }} title={item.Composant}>{item.Composant}</td>
+                                      <td style={{ color: '#f8fafc', padding: '4px 0', textAlign: 'right', fontWeight: 'bold' }}>{item.Mo} <span style={{color: '#64748b', fontWeight: 'normal', fontSize: '0.7rem'}}>Mo</span></td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                            <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(139, 92, 246, 0.2)', display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', fontWeight: 'bold' }}>
+                              <span style={{ color: '#8b5cf6' }}>Total PGA</span>
+                              <span style={{ color: '#f8fafc' }}>{getMetric('performance').ram.pga_total_mb} <span style={{ color: '#64748b', fontSize: '0.75rem', fontWeight: 'normal' }}>Mo</span></span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -504,35 +555,19 @@ export default function AuditPage() {
                 {loadingPlan && <div style={{ marginTop: '20px', color: '#8b5cf6' }}><Activity className="animate-spin" size={18} /> Planification...</div>}
                 {selectedPlan && !loadingPlan && (
                   <div style={{ marginTop: '25px', background: '#0f172a', borderRadius: '12px', border: '1px solid #1e293b' }}>
-                    <div style={{ maxHeight: '350px', overflowY: 'auto' }}>
-                      <table className="og-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                        <thead style={{ position: 'sticky', top: 0, background: '#0f172a', zIndex: 1 }}>
-                          <tr>
-                            {['ID', 'Opération', 'Objet', 'Lignes', 'Coût', 'Temps'].map(h => (
-                              <th key={h} style={{ textAlign: 'left', padding: '12px 16px', color: '#64748b', fontSize: '0.75rem', textTransform: 'uppercase' }}>{h}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {Array.isArray(selectedPlan) && selectedPlan.length > 0 ? selectedPlan.map((step, idx) => (
-                            <tr key={idx} style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-                              <td style={{ padding: '10px 16px', color: '#64748b', fontSize: '0.8rem' }}>{step.id}</td>
-                              <td style={{ padding: '10px 16px', whiteSpace: 'pre', fontFamily: 'monospace', color: '#e2e8f0', fontSize: '0.85rem' }}>{step.operation}</td>
-                              <td style={{ padding: '10px 16px', color: '#38bdf8', fontSize: '0.85rem' }}>{step.name}</td>
-                              <td style={{ padding: '10px 16px', color: '#cbd5e1' }}>{step.rows}</td>
-                              <td style={{ padding: '10px 16px', color: '#f59e0b', fontWeight: 600 }}>{step.cost}</td>
-                              <td style={{ padding: '10px 16px', color: '#10b981' }}>{step.time}</td>
-                            </tr>
-                          )) : (
-                            <tr>
-                              <td colSpan="6" style={{ padding: '20px', textAlign: 'center', color: '#64748b' }}>Aucun détail de plan disponible.</td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
+                    <div style={{ maxHeight: '350px', overflowY: 'auto', padding: '16px' }}>
+                      {typeof selectedPlan === 'string' && selectedPlan.trim() !== '' ? (
+                        <pre style={{ margin: 0, fontFamily: 'monospace', fontSize: '0.85rem', color: '#e2e8f0', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                          {selectedPlan}
+                        </pre>
+                      ) : (
+                        <div style={{ textAlign: 'center', color: '#64748b', padding: '20px' }}>
+                          Aucun détail de plan disponible.
+                        </div>
+                      )}
                     </div>
                     <div style={{ padding: '12px 20px', borderTop: '1px solid rgba(255,255,255,0.05)', color: '#64748b', fontSize: '0.75rem', display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Source: V$SQL_PLAN</span>
+                      <span>Source: DBMS_XPLAN</span>
                       <span>ID SQL: {activeSqlId}</span>
                     </div>
                   </div>

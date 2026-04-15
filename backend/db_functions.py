@@ -370,8 +370,14 @@ def get_ram_stats(id_base):
             cursor.execute("SELECT ROUND(VALUE/1024/1024,2) FROM V$PGASTAT WHERE NAME='aggregate PGA target parameter'")
             pga_target_row = cursor.fetchone()
             pga_max = pga_target_row[0] if pga_target_row and pga_target_row[0] else max(pga_total, 1)
+            
+            # Extract detailed PGA components
+            cursor.execute("SELECT NAME, ROUND(VALUE/1024/1024,2) FROM V$PGASTAT WHERE VALUE > 0 AND NAME NOT LIKE '%parameter%' AND NAME NOT IN ('total PGA allocated', 'maximum PGA allocated', 'total PGA inuse') ORDER BY VALUE DESC FETCH FIRST 5 ROWS ONLY")
+            pga_rows = cursor.fetchall()
+            pga_detail = [{"Composant": str(r[0]).capitalize(), "Mo": r[1]} for r in pga_rows]
+            
             used_mb, max_mb = sga_total + pga_total, sga_max + pga_max
-            res = {"sga_total_mb": sga_total, "pga_total_mb": pga_total, "used_mb": used_mb, "max_mb": max_mb, "ram_pct": round((used_mb/max_mb)*100, 2) if max_mb > 0 else 0, "sga_detail": sga_detail}
+            res = {"sga_total_mb": sga_total, "pga_total_mb": pga_total, "used_mb": used_mb, "max_mb": max_mb, "ram_pct": round((used_mb/max_mb)*100, 2) if max_mb > 0 else 0, "sga_detail": sga_detail, "pga_detail": pga_detail}
         else: # MYSQL
             cursor.execute("SELECT SUM(data_length + index_length) / 1024 / 1024 FROM information_schema.TABLES")
             used = cursor.fetchone()[0] or 0
@@ -381,7 +387,8 @@ def get_ram_stats(id_base):
             res = {
                 "used_mb": round(used, 2), "max_mb": round(max_mb, 2), 
                 "ram_pct": round((used/max_mb)*100, 2) if max_mb > 0 else 0, 
-                "sga_detail": [{"Composant": "Table Data", "Mo": round(used, 2)}, {"Composant": "InnoDB Buffer Pool", "Mo": round(max_mb, 2)}]
+                "sga_detail": [{"Composant": "Table Data", "Mo": round(used, 2)}, {"Composant": "InnoDB Buffer Pool", "Mo": round(max_mb, 2)}],
+                "pga_detail": []
             }
         conn.close()
         return res
@@ -557,13 +564,17 @@ def verifier_index_tables(id_base, sql_script):
         return results
     except Exception as e: return {"error": str(e)}
 
+import pandas as pd
+
 def get_explain_plan(id_base, sql_query):
     query_clean = sql_query.strip().rstrip(';')
     conn, db_type, err = get_db_connection(id_base)
     if err or not conn: return None, err or "Inaccessible"
+    
     try:
         cursor = conn.cursor()
         if db_type == "ORACLE":
+            # Cette méthode reste parfaite pour évaluer un texte SQL brut
             cursor.execute(f"EXPLAIN PLAN FOR {query_clean}")
             cursor.execute("SELECT PLAN_TABLE_OUTPUT FROM TABLE(DBMS_XPLAN.DISPLAY())")
             plan_text = "\n".join([str(r[0]) for r in cursor.fetchall()])
@@ -571,47 +582,80 @@ def get_explain_plan(id_base, sql_query):
             cursor.execute(f"EXPLAIN {query_clean}")
             res = cursor.fetchall()
             plan_text = "MYSQL EXPLAIN:\n" + "\n".join([str(r) for r in res])
+            
         conn.close()
         return plan_text, None
     except Exception as e:
         if conn: conn.close()
         return None, str(e)
 
+
 def get_sql_plan_by_id(id_base, sql_id):
     conn, db_type, err = get_db_connection(id_base)
     if err or not conn: return None, err or "Inaccessible"
     if db_type != "ORACLE": return "Oracle uniquement.", None
-    query = f"""
-        SELECT id, LPAD(' ', NVL(depth, 0)*2, ' ') || operation AS operation, object_name AS name, 
-               cardinality AS rows_est, cost AS cost_cpu, time AS time_sec 
-        FROM v$sql_plan WHERE sql_id = '{sql_id}' ORDER BY id
-    """
+    
     try:
-        df = pd.read_sql(query, con=conn)
+        cursor = conn.cursor()
+        
+        # --- 1er ESSAI : Mémoire Vive (RAM) ---
+        try:
+            cursor.execute(f"SELECT PLAN_TABLE_OUTPUT FROM TABLE(DBMS_XPLAN.DISPLAY_CURSOR('{sql_id}', NULL, 'ALL'))")
+            plan_text = "\n".join([str(r[0]) for r in cursor.fetchall() if r[0] is not None])
+        except Exception:
+            plan_text = ""
+            
+        if not plan_text or "cannot fetch plan" in plan_text.lower():
+            
+            # --- 2ème ESSAI : Historique AWR ---
+            try:
+                cursor.execute(f"SELECT PLAN_TABLE_OUTPUT FROM TABLE(DBMS_XPLAN.DISPLAY_AWR('{sql_id}'))")
+                plan_text_awr = "\n".join([str(r[0]) for r in cursor.fetchall() if r[0] is not None])
+            except Exception:
+                plan_text_awr = ""
+                
+            if not plan_text_awr or "cannot fetch plan" in plan_text_awr.lower() or "no data found" in plan_text_awr.lower():
+                
+                # --- 3ème ESSAI (LA SOLUTION ULTIME) : Génération à la volée ---
+                try:
+                    # On cherche le texte de la requête dans la RAM
+                    cursor.execute(f"SELECT sql_fulltext FROM v$sql WHERE sql_id = '{sql_id}' AND ROWNUM = 1")
+                    row = cursor.fetchone()
+                    
+                    # Si introuvable en RAM, on cherche dans l'historique
+                    if not row:
+                        cursor.execute(f"SELECT sql_text FROM dba_hist_sqltext WHERE sql_id = '{sql_id}' AND ROWNUM = 1")
+                        row = cursor.fetchone()
+                    
+                    if row:
+                        sql_text = row[0].read() if hasattr(row[0], 'read') else str(row[0])
+                        clean_text = sql_text.strip().rstrip(';')
+                        
+                        # Vérifier que c'est une commande DML supportée par EXPLAIN PLAN
+                        first_word = clean_text.split()[0].upper() if clean_text.split() else ''
+                        supported_keywords = ('SELECT', 'INSERT', 'UPDATE', 'DELETE', 'MERGE', 'WITH')
+                        
+                        if first_word in supported_keywords:
+                            cursor.execute(f"EXPLAIN PLAN FOR {clean_text}")
+                            cursor.execute("SELECT PLAN_TABLE_OUTPUT FROM TABLE(DBMS_XPLAN.DISPLAY())")
+                            plan_text_fallback = "\n".join([str(r[0]) for r in cursor.fetchall() if r[0] is not None])
+                            plan_text = "--- PLAN GÉNÉRÉ À LA VOLÉE (Original expiré) ---\n" + plan_text_fallback
+                        else:
+                            plan_text = f"Le plan n'est plus en mémoire.\nType de requête non supporté par EXPLAIN PLAN ('{first_word}...'). Seuls SELECT, INSERT, UPDATE, DELETE et MERGE sont analysables."
+                    else:
+                        plan_text = f"Le plan n'est plus en mémoire et le texte de la requête (SQL_ID '{sql_id}') est introuvable."
+                
+                except Exception as e_fallback:
+                    plan_text = f"Le plan n'est plus en mémoire.\nErreur lors de la génération du plan à la volée : {str(e_fallback)}"
+            else:
+                plan_text = "--- PLAN RÉCUPÉRÉ DEPUIS L'HISTORIQUE (AWR) ---\n" + plan_text_awr
+                
         conn.close()
-        res = []
-        for row in df.to_dict(orient='records'):
-            t = int(row.get('TIME_SEC') or 0)
-            res.append({
-                "id": row.get('ID'), "operation": row.get('OPERATION'), "name": str(row.get('NAME', '')),
-                "rows": row.get('ROWS_EST'), "cost": row.get('COST_CPU'),
-                "time": f"{t//3600:02d}:{(t%3600)//60:02d}:{t%60:02d}"
-            })
-        return res, None
-    except Exception as e: return None, str(e)
-
-# ==========================================
-# 5. EXTERNAL (GRAFANA)
-# ==========================================
-
-def push_to_grafana(database_name, cpu, ram, sessions):
-    url = "https://influx-prod-55-prod-gb-south-1.grafana.net/api/v1/push/influx/write"
-    auth = ("2957774", "glc_eyJvIjoiMTY2MDYwOCIsIm4iOiJzdGFjay0xNTE2NzczLWhtLXdyaXRlLXB1c2hfb3JhY2xlMSIsImsiOiJVNjEyVkFjWDhwazRNSkU3OXRKZk85NDEiLCJtIjp7InIiOiJwcm9kLWdiLXNvdXRoLTEifX0=")
-    data = f"oracle_metrics,db_name={database_name.replace(' ','_')} cpu={cpu},ram={ram},sessions={sessions}"
-    try:
-        requests.post(url, auth=auth, data=data, timeout=3)
-        return True
-    except: return False
+        return plan_text, None
+        
+    except Exception as e: 
+        if conn: conn.close()
+        return None, str(e)
     
 # ==========================================
 # 7. HISTORIQUE DES RAPPORTS PDF
@@ -815,7 +859,13 @@ def executer_audit_complet(id_base):
             
             cursor.execute("""
                 SELECT SQL_ID, ROUND(ELAPSED_TIME/1000000, 2), SUBSTR(SQL_TEXT,1,100) 
-                FROM (SELECT * FROM v$sql ORDER BY ELAPSED_TIME DESC) 
+                FROM (
+                    SELECT * FROM v$sql 
+                    WHERE PARSING_SCHEMA_NAME IS NOT NULL
+                    AND PARSING_SCHEMA_NAME NOT IN ('SYS', 'SYSTEM', 'DBSNMP', 'SYSMAN', 'OUTLN', 'MDSYS', 'ORDSYS', 'EXFSYS', 'WMSYS', 'APPQOSSYS', 'DBSFWUSER', 'XDB')
+                    AND COMMAND_TYPE IN (2, 3, 6, 7, 189)
+                    ORDER BY ELAPSED_TIME DESC
+                ) 
                 WHERE ROWNUM <= 5
             """)
             queries["slow_queries"] = [{"sql_id": r[0], "elapsed": r[1], "text": r[2]} for r in cursor.fetchall()]
@@ -897,6 +947,89 @@ def executer_audit_complet(id_base):
         if conn: conn.close()
         return False, str(e), None
 
+def flatten_dict(d, parent_key='', sep='.'):
+    items = []
+    if isinstance(d, dict):
+        if not d:
+            items.append((parent_key, '{}'))
+        else:
+            for k, v in d.items():
+                new_key = f"{parent_key}{sep}{k}" if parent_key else k
+                if isinstance(v, (dict, list)):
+                    items.extend(flatten_dict(v, new_key, sep=sep).items())
+                else:
+                    items.append((new_key, v))
+    elif isinstance(d, list):
+        if not d:
+            items.append((parent_key, '[]'))
+        else:
+            for i, item in enumerate(d):
+                item_key = f"{parent_key}[{i}]" if parent_key else str(i)
+                if isinstance(item, (dict, list)):
+                    items.extend(flatten_dict(item, item_key, sep=sep).items())
+                else:
+                    items.append((item_key, item))
+    else:
+        items.append((parent_key, d))
+    return dict(items)
+
+def draw_pdf_table(pdf, category_name, flat_data_dict):
+    pdf.set_font('helvetica', 'B', 12)
+    # Background slate dark (#0F172A)
+    pdf.set_fill_color(15, 23, 42) 
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(0, 10, f" METRIQUES : {str(category_name).upper()}", border=1, ln=1, align='L', fill=True)
+    
+    # En-tête de tableau
+    pdf.set_font('helvetica', 'B', 10)
+    # Background sky blue for headers (#0EA5E9)
+    pdf.set_fill_color(14, 165, 233)
+    pdf.set_text_color(255, 255, 255)
+    
+    col_width1 = 80
+    col_width2 = pdf.w - pdf.l_margin - pdf.r_margin - col_width1
+    
+    pdf.cell(col_width1, 8, "Paramètre", border=1, align='C', fill=True)
+    pdf.cell(col_width2, 8, "Valeur", border=1, ln=1, align='C', fill=True)
+    
+    pdf.set_font('helvetica', '', 9)
+    pdf.set_text_color(30, 41, 59)
+    
+    for key, value in flat_data_dict.items():
+        val_str = str(value)
+        val_str = val_str.replace('\n', ' ')
+        
+        start_x = pdf.get_x()
+        start_y = pdf.get_y()
+        
+        # Gestion du saut de page si on est en bas
+        if start_y > 270:
+            pdf.add_page()
+            start_x = pdf.get_x()
+            start_y = pdf.get_y()
+            
+        # Draw Key
+        pdf.set_xy(start_x, start_y)
+        pdf.multi_cell(col_width1, 6, str(key), border=0, align='L')
+        end_y1 = pdf.get_y()
+        
+        # Draw Value
+        pdf.set_xy(start_x + col_width1, start_y)
+        pdf.multi_cell(col_width2, 6, val_str, border=0, align='L')
+        end_y2 = pdf.get_y()
+        
+        # Calcul de la hauteur de la ligne
+        max_y = max(end_y1, end_y2)
+        row_height = max_y - start_y
+        
+        # Tracer les bordures rectangulaires et ajuster
+        pdf.rect(start_x, start_y, col_width1, row_height)
+        pdf.rect(start_x + col_width1, start_y, col_width2, row_height)
+        
+        pdf.set_y(max_y)
+    
+    pdf.ln(5)
+
 def save_audit_report(id_base, audit_data, ai_analysis_string):
     """
     Génère un PDF en mémoire (BytesIO) et l'insère dans la colonne BLOB 'fichier_pdf'.
@@ -919,15 +1052,8 @@ def save_audit_report(id_base, audit_data, ai_analysis_string):
     pdf.chapter_title("2. Données Brutes de l'Audit")
     for categorie, data in audit_data.items():
         if isinstance(data, dict) and not 'error' in data:
-            pdf.set_font('helvetica', 'B', 12)
-            # Sous-titre
-            pdf.set_text_color(14, 165, 233)
-            pdf.cell(0, 10, f"--> METRIQUES : {str(categorie).upper()}", 0, 1, 'L')
-            
-            # Formatage récursif propre
-            clean_metrics = pdf.format_data_recursive(data)
-            pdf.chapter_body(clean_metrics)
-            pdf.ln(2)
+            flat_data = flatten_dict(data)
+            draw_pdf_table(pdf, categorie, flat_data)
 
     # Séparateur et nouvelle page
     pdf.add_page()

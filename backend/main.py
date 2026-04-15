@@ -1,5 +1,5 @@
 # backend/main.py
-from fastapi import FastAPI, HTTPException, Query, Request, Response, UploadFile, File
+from fastapi import FastAPI, HTTPException, Query, Request, Response, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -226,7 +226,7 @@ def add_script(req: ScriptRequest):
     return {"message": msg}
 
 @app.post("/api/scripts/upload-zip")
-async def upload_scripts_zip(file: UploadFile = File(...)):
+async def upload_scripts_zip(file: UploadFile = File(...), db_type: str = Form(...)):
     if not file.filename.endswith('.zip'):
         raise HTTPException(status_code=400, detail="Seuls les fichiers .zip sont acceptés")
     
@@ -246,7 +246,8 @@ async def upload_scripts_zip(file: UploadFile = File(...)):
                         clean_name = filename.split('/')[-1]
                         scripts.append({
                             "nom": clean_name,
-                            "sql": sql_content
+                            "sql": sql_content,
+                            "type": db_type
                         })
         
         return {"message": "succès", "scripts": scripts}

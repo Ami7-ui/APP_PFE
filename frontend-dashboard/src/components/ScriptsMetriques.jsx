@@ -3,10 +3,11 @@ import useSqlStore from '../store/useSqlStore';
 
 const ScriptsMetriques = () => {
     const [file, setFile] = useState(null);
+    const [selectedType, setSelectedType] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [success, setSuccess] = useState(false);
-    const setExtractedScripts = useSqlStore((state) => state.setExtractedScripts);
+    const addScripts = useSqlStore((state) => state.addScripts);
     const fileInputRef = useRef(null);
 
     const handleFileChange = (e) => {
@@ -22,8 +23,8 @@ const ScriptsMetriques = () => {
     };
 
     const handleUpload = async () => {
-        if (!file) {
-            setError("Veuillez sélectionner un fichier .zip");
+        if (!file || !selectedType) {
+            setError("Veuillez sélectionner un fichier .zip ET un type de base de données");
             return;
         }
 
@@ -32,6 +33,7 @@ const ScriptsMetriques = () => {
         
         const formData = new FormData();
         formData.append('file', file);
+        formData.append('db_type', selectedType);
 
         try {
             const response = await fetch('http://localhost:8000/api/scripts/upload-zip', {
@@ -42,7 +44,7 @@ const ScriptsMetriques = () => {
             const result = await response.json();
 
             if (response.ok) {
-                setExtractedScripts(result.scripts);
+                addScripts(result.scripts);
                 setSuccess(true);
             } else {
                 setError(result.detail || "Une erreur est survenue lors de l'importation.");
@@ -61,6 +63,17 @@ const ScriptsMetriques = () => {
             <p style={styles.subtitle}>Sélectionnez une archive .zip contenant vos scripts SQL (.sql)</p>
             
             <div style={styles.inputGroup}>
+                <select 
+                    value={selectedType} 
+                    onChange={(e) => setSelectedType(e.target.value)}
+                    style={styles.selectType}
+                >
+                    <option value="">-- Type DB --</option>
+                    <option value="Oracle">Oracle</option>
+                    <option value="MySQL">MySQL</option>
+                    <option value="PostgreSQL">PostgreSQL</option>
+                </select>
+
                 <input 
                     type="file" 
                     accept=".zip" 
@@ -74,22 +87,22 @@ const ScriptsMetriques = () => {
                     onClick={handleBrowseClick}
                     style={styles.browseButton}
                 >
-                    📁 Parcourir
+                    📁 ZIP
                 </button>
 
                 <div style={styles.fileNameDisplay}>
-                    {file ? file.name : "Aucun fichier sélectionné"}
+                    {file ? file.name : "Fichier.zip"}
                 </div>
                 
                 <button 
                     onClick={handleUpload} 
-                    disabled={loading || !file}
+                    disabled={loading || !file || !selectedType}
                     style={{
                         ...styles.uploadButton,
-                        ...(loading || !file ? styles.buttonDisabled : {})
+                        ...(loading || !file || !selectedType ? styles.buttonDisabled : {})
                     }}
                 >
-                    {loading ? "Chargement..." : "✈️ Importer"}
+                    {loading ? "..." : "✈️ Importer"}
                 </button>
             </div>
 
@@ -119,7 +132,7 @@ const styles = {
     title: {
         margin: '0 0 8px 0',
         fontSize: '1.25rem',
-        background: 'linear-gradient(45deg, #00f2fe 0%, #4facfe 100%)',
+        background: 'linear-gradient(45deg, #ee48b9 0%, #f90bc5 100%)',
         WebkitBackgroundClip: 'text',
         WebkitTextFillColor: 'transparent',
     },
@@ -130,20 +143,32 @@ const styles = {
     },
     inputGroup: {
         display: 'flex',
-        gap: '12px',
+        gap: '10px',
         alignItems: 'center',
+    },
+    selectType: {
+        width: '130px',
+        padding: '10px',
+        background: 'rgba(255, 255, 255, 0.08)',
+        color: 'white',
+        border: '1px solid rgba(255, 255, 255, 0.1)',
+        borderRadius: '8px',
+        cursor: 'pointer',
+        fontSize: '0.85rem',
+        outline: 'none',
     },
     fileInput: {
         display: 'none',
     },
     fileNameDisplay: {
-        flex: 1,
-        padding: '10px 16px',
+        flex: 2,
+        minWidth: '120px',
+        padding: '10px 12px',
         background: 'rgba(255, 255, 255, 0.05)',
         borderRadius: '8px',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
-        color: '#ccc',
-        fontSize: '0.9rem',
+        border: '1px dashed rgba(255, 255, 255, 0.2)',
+        color: '#aaa',
+        fontSize: '0.85rem',
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',

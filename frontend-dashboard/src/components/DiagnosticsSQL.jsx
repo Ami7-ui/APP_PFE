@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import useSqlStore from '../store/useSqlStore';
 
 const DiagnosticsSQL = () => {
     const extractedScripts = useSqlStore((state) => state.extractedScripts);
+    const [filterType, setFilterType] = useState('Tous');
 
     if (extractedScripts.length === 0) {
         return (
@@ -17,6 +18,10 @@ const DiagnosticsSQL = () => {
         );
     }
 
+    const filteredScripts = filterType === 'Tous' 
+        ? extractedScripts 
+        : extractedScripts.filter(script => script.type === filterType);
+
     return (
         <div style={styles.container}>
             <div style={styles.header}>
@@ -24,8 +29,23 @@ const DiagnosticsSQL = () => {
                 <p style={styles.subtitle}>Aperçu des scripts prêts pour l'analyse</p>
             </div>
 
+            <div style={styles.filterBar}>
+                {['Tous', 'Oracle', 'MySQL', 'PostgreSQL'].map(type => (
+                    <button 
+                        key={type}
+                        onClick={() => setFilterType(type)}
+                        style={{
+                            ...styles.filterButton,
+                            ...(filterType === type ? styles.filterButtonActive : {})
+                        }}
+                    >
+                        {type} {type !== 'Tous' && `(${extractedScripts.filter(s => s.type === type).length})`}
+                    </button>
+                ))}
+            </div>
+
             <div style={styles.grid}>
-                {extractedScripts.map((script, index) => (
+                {filteredScripts.map((script, index) => (
                     <div key={index} style={styles.scriptCard}>
                         <div style={styles.cardHeader}>
                             <h4 style={styles.cardTitle}>{script.nom}</h4>
@@ -40,7 +60,7 @@ const DiagnosticsSQL = () => {
                             </pre>
                         </div>
                         <div style={styles.cardFooter}>
-                            <span style={styles.badge}>SQL</span>
+                            <span style={styles.badge}>{script.type ? script.type.toUpperCase() : 'SQL'}</span>
                             <span style={styles.charCount}>{script.sql.length} caractères</span>
                         </div>
                     </div>
@@ -66,6 +86,26 @@ const styles = {
         color: '#aaa',
         fontSize: '0.9rem',
         margin: 0,
+    },
+    filterBar: {
+        display: 'flex',
+        gap: '10px',
+        marginBottom: '20px',
+    },
+    filterButton: {
+        background: 'rgba(255, 255, 255, 0.05)',
+        border: '1px solid rgba(255, 255, 255, 0.1)',
+        color: '#aaa',
+        padding: '6px 16px',
+        borderRadius: '20px',
+        cursor: 'pointer',
+        fontSize: '0.85rem',
+        transition: 'all 0.2s',
+    },
+    filterButtonActive: {
+        background: 'rgba(79, 172, 254, 0.2)',
+        borderColor: '#4facfe',
+        color: '#fff',
     },
     emptyContainer: {
         background: 'rgba(255, 255, 255, 0.03)',
