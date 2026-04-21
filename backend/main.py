@@ -81,6 +81,10 @@ class ReportSaveRequest(BaseModel):
     audit_data: dict
     ai_analysis: str
 
+class GranularAuditRequest(BaseModel):
+    id_base: int
+    scripts: List[dict]
+
 # ── ROUTES AUTHENTIFICATION ───────────────────────────────────────────────────
 
 @app.post("/api/login")
@@ -208,6 +212,16 @@ async def get_execution_plan(id_base: int, sql_id: str):
     plan_data, error = db_functions.get_sql_plan_by_id(id_base, sql_id)
     if error: raise HTTPException(status_code=400, detail=f"Erreur Oracle: {error}")
     return {"plan": plan_data}
+
+@app.get("/api/diagnostics/scripts")
+def get_diagnostics_scripts():
+    return db_functions.get_scripts_categorizes()
+
+@app.post("/api/audit/granular")
+def run_granular_audit(req: GranularAuditRequest):
+    ok, msg, data = db_functions.executer_audit_granulaire(req.id_base, req.scripts)
+    if not ok: raise HTTPException(status_code=400, detail=msg)
+    return {"message": msg, "data": data}
 
 # ── GESTION DES SCRIPTS (BIBLIOTHÈQUE) ────────────────────────────────────────
 

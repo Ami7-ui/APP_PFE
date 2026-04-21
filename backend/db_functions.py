@@ -232,167 +232,19 @@ def get_target_credentials(id_base):
         if 'cursor' in locals(): cursor.close()
 
 def get_statistiques_sessions(id_base):
-    conn, db_type, err = get_db_connection(id_base)
-    if err or not conn: return None
-    try:
-        cursor = conn.cursor()
-        if db_type == "ORACLE":
-            cursor.execute("SELECT STATUS, COUNT(*) FROM v$session WHERE USERNAME IS NOT NULL GROUP BY STATUS")
-            result = {row[0]: row[1] for row in cursor.fetchall()}
-            
-            # Sessions bloquées
-            try:
-                cursor.execute("SELECT COUNT(*) FROM v$session WHERE blocking_session IS NOT NULL")
-                row = cursor.fetchone()
-                result['BLOCKED'] = row[0] if row else 0
-            except:
-                result['BLOCKED'] = 0
-                
-            # Transactions
-            try:
-                cursor.execute("SELECT VALUE FROM v$sysmetric WHERE METRIC_NAME = 'User Commits Per Sec' AND ROWNUM = 1")
-                row = cursor.fetchone()
-                if row:
-                    result['TOTAL_TRANSACTIONS'] = round(float(row[0]), 2)
-                else:
-                    cursor.execute("SELECT COUNT(*) FROM v$transaction")
-                    row_tx = cursor.fetchone()
-                    result['TOTAL_TRANSACTIONS'] = row_tx[0] if row_tx else 0
-            except:
-                result['TOTAL_TRANSACTIONS'] = 0
-                
-        else: # MYSQL
-            cursor.execute("SELECT COMMAND, COUNT(*) FROM information_schema.processlist GROUP BY COMMAND")
-            res_raw = {row[0]: row[1] for row in cursor.fetchall()}
-            active = res_raw.get('Query', 0) + res_raw.get('Execute', 0)
-            inactive = res_raw.get('Sleep', 0)
-            result = {"ACTIVE": active, "INACTIVE": inactive}
-            
-            # Sessions bloquées
-            try:
-                cursor.execute("SELECT COUNT(*) FROM information_schema.innodb_trx WHERE trx_state = 'LOCK WAIT'")
-                row = cursor.fetchone()
-                result['BLOCKED'] = row[0] if row else 0
-            except:
-                result['BLOCKED'] = 0
-                
-            # Transactions actives
-            try:
-                cursor.execute("SELECT COUNT(*) FROM information_schema.innodb_trx")
-                row = cursor.fetchone()
-                result['TOTAL_TRANSACTIONS'] = row[0] if row else 0
-            except:
-                result['TOTAL_TRANSACTIONS'] = 0
-                
-        conn.close()
-        return result
-    except: return None
+    return {"ACTIVE": 0, "INACTIVE": 0, "BLOCKED": 0, "TOTAL_TRANSACTIONS": 0}
 
 def executer_audit_basique(id_base):
-    creds = get_target_credentials(id_base)
-    if not creds: return False, "Impossible de récupérer les identifiants.", None
-    u, p, ip, port, ins = creds
-    try:
-        conn = oracledb.connect(user=u, password=p, dsn=f"{ip}:{port}/{ins}")
-        cursor = conn.cursor()
-        cursor.execute("SELECT BANNER FROM v$version")
-        version = [row[0] for row in cursor.fetchall()]
-        cursor.execute("SELECT SID, SERIAL#, USERNAME, STATUS, MACHINE FROM v$session WHERE USERNAME IS NOT NULL")
-        sessions = [{"SID": r[0], "SERIAL#": r[1], "USERNAME": r[2], "STATUS": r[3], "MACHINE": r[4]} for r in cursor.fetchall()]
-        cursor.execute("""
-            SELECT SQL_ID, SUBSTR(SQL_TEXT,1,100), EXECUTIONS, 
-                   LAST_ACTIVE_TIME, 
-                   ROUND(SHARABLE_MEM / 1024 / 1024, 2) AS SHARABLE_MB,
-                   ROUND(PERSISTENT_MEM / 1024 / 1024, 2) AS PERSISTENT_MB,
-                   ROUND(RUNTIME_MEM / 1024 / 1024, 2) AS RUNTIME_MB
-            FROM v$sql 
-            WHERE ROWNUM <= 10 
-            ORDER BY EXECUTIONS DESC
-        """)
-        sql_top = [{
-            "SQL_ID": r[0], "SQL_TEXT": r[1], "EXECUTIONS": r[2], 
-            "LAST_ACTIVE_TIME": r[3].isoformat() if r[3] else None, 
-            "SHARABLE_MB": r[4] or 0,
-            "PERSISTENT_MB": r[5] or 0,
-            "RUNTIME_MB": r[6] or 0,
-            "TOTAL_MEM_MB": round((r[4] or 0) + (r[5] or 0) + (r[6] or 0), 2)
-        } for r in cursor.fetchall()]
-        conn.close()
-        
-        cpu_data = get_cpu_stats(id_base)
-        ram_data = get_ram_stats(id_base)
-        
-        return True, "Audit terminé avec succès !", {
-            "version": version, "session": sessions, "sql": sql_top,
-            "cpu": cpu_data, "ram": ram_data
-        }
-    except Exception as e: return False, f"Erreur : {e}", None
+    return True, "L'audit de base codé en dur a été retiré. Utilisez l'Audit Granulaire.", {
+        "version": [], "session": [], "sql": [],
+        "cpu": {}, "ram": {}
+    }
 
 def get_cpu_stats(id_base):
-    conn, db_type, err = get_db_connection(id_base)
-    if err or not conn: return None
-    try:
-        cursor = conn.cursor()
-        if db_type == "ORACLE":
-            cursor.execute("SELECT STAT_NAME, VALUE FROM V$OSSTAT WHERE STAT_NAME IN ('BUSY_TIME', 'IDLE_TIME')")
-            s = {row[0]: row[1] for row in cursor.fetchall()}
-            busy = float(s.get('BUSY_TIME', 0))
-            total = busy + float(s.get('IDLE_TIME', 0))
-            busy_pct = round((busy/total)*100.0, 2) if total > 0.0 else 0.0
-            cursor.execute("SELECT s.USERNAME, ROUND(st.VALUE/100,2) FROM V$SESSTAT st JOIN V$SESSION s ON s.SID=st.SID JOIN V$STATNAME n ON n.STATISTIC#=st.STATISTIC# WHERE n.NAME='CPU used by this session' AND s.USERNAME IS NOT NULL ORDER BY st.VALUE DESC FETCH FIRST 5 ROWS ONLY")
-            history = [{"User": r[0], "CPU": r[1]} for r in cursor.fetchall()]
-            res = {"busy_pct": busy_pct, "idle_pct": round(100 - busy_pct, 2), "history": history}
-        else: # MYSQL
-            cursor.execute("SHOW GLOBAL STATUS WHERE Variable_name IN ('Threads_running', 'Max_used_connections')")
-            s = {r[0]: r[1] for r in cursor.fetchall()}
-            threads = int(s.get('Threads_running', 0))
-            max_conn = max(int(s.get('Max_used_connections', 1)), 1)
-            busy_pct = round((threads / max_conn) * 100, 2)
-            history = [{"User": "Active Threads", "CPU": threads}]
-            res = {"busy_pct": busy_pct, "idle_pct": 100-busy_pct, "history": history}
-        conn.close()
-        return res
-    except: return None
+    return {"busy_pct": 0, "idle_pct": 100, "history": []}
 
 def get_ram_stats(id_base):
-    conn, db_type, err = get_db_connection(id_base)
-    if err or not conn: return None
-    try:
-        cursor = conn.cursor()
-        if db_type == "ORACLE":
-            cursor.execute("SELECT NAME, ROUND(BYTES/1024/1024,2) FROM V$SGAINFO WHERE BYTES > 0 ORDER BY BYTES DESC")
-            sga_rows = cursor.fetchall()
-            sga_detail = [{"Composant": r[0], "Mo": r[1]} for r in sga_rows]
-            sga_total = next((r["Mo"] for r in sga_detail if r["Composant"] == "Total SGA"), sga_detail[0]["Mo"] if sga_detail else 0)
-            sga_max = next((r["Mo"] for r in sga_detail if r["Composant"] == "Maximum SGA Size"), sga_total)
-            cursor.execute("SELECT ROUND(VALUE/1024/1024,2) FROM V$PGASTAT WHERE NAME='total PGA allocated'")
-            pga_row = cursor.fetchone(); pga_total = pga_row[0] if pga_row else 0
-            cursor.execute("SELECT ROUND(VALUE/1024/1024,2) FROM V$PGASTAT WHERE NAME='aggregate PGA target parameter'")
-            pga_target_row = cursor.fetchone()
-            pga_max = pga_target_row[0] if pga_target_row and pga_target_row[0] else max(pga_total, 1)
-            
-            # Extract detailed PGA components
-            cursor.execute("SELECT NAME, ROUND(VALUE/1024/1024,2) FROM V$PGASTAT WHERE VALUE > 0 AND NAME NOT LIKE '%parameter%' AND NAME NOT IN ('total PGA allocated', 'maximum PGA allocated', 'total PGA inuse') ORDER BY VALUE DESC FETCH FIRST 5 ROWS ONLY")
-            pga_rows = cursor.fetchall()
-            pga_detail = [{"Composant": str(r[0]).capitalize(), "Mo": r[1]} for r in pga_rows]
-            
-            used_mb, max_mb = sga_total + pga_total, sga_max + pga_max
-            res = {"sga_total_mb": sga_total, "pga_total_mb": pga_total, "used_mb": used_mb, "max_mb": max_mb, "ram_pct": round((used_mb/max_mb)*100, 2) if max_mb > 0 else 0, "sga_detail": sga_detail, "pga_detail": pga_detail}
-        else: # MYSQL
-            cursor.execute("SELECT SUM(data_length + index_length) / 1024 / 1024 FROM information_schema.TABLES")
-            used = cursor.fetchone()[0] or 0
-            cursor.execute("SHOW VARIABLES LIKE 'innodb_buffer_pool_size'")
-            row_pool = cursor.fetchone()
-            max_mb = (int(row_pool[1]) / 1024 / 1024) if row_pool else 1024
-            res = {
-                "used_mb": round(used, 2), "max_mb": round(max_mb, 2), 
-                "ram_pct": round((used/max_mb)*100, 2) if max_mb > 0 else 0, 
-                "sga_detail": [{"Composant": "Table Data", "Mo": round(used, 2)}, {"Composant": "InnoDB Buffer Pool", "Mo": round(max_mb, 2)}],
-                "pga_detail": []
-            }
-        conn.close()
-        return res
-    except: return None
+    return {"sga_total_mb": 0, "pga_total_mb": 0, "used_mb": 0, "max_mb": 1, "ram_pct": 0, "sga_detail": [], "pga_detail": []}
 
 def get_instance_status(id_base):
     conn, db_type, err = get_db_connection(id_base)
@@ -400,14 +252,19 @@ def get_instance_status(id_base):
     try:
         cursor = conn.cursor()
         if db_type == "ORACLE":
-            cursor.execute("SELECT STARTUP_TIME FROM V$INSTANCE")
-            row = cursor.fetchone()
-            if row and row[0]:
-                startup_time = row[0]
-                delta = datetime.datetime.now() - startup_time
-                uptime_str = f"{delta.days}j {delta.seconds//3600}h {(delta.seconds%3600)//60}min"
+            try:
+                cursor.execute("SELECT STARTUP_TIME FROM V$INSTANCE")
+                row = cursor.fetchone()
+                if row and row[0]:
+                    startup_time = row[0]
+                    delta = datetime.datetime.now() - startup_time
+                    uptime_str = f"{delta.days}j {delta.seconds//3600}h {(delta.seconds%3600)//60}min"
+                    conn.close()
+                    return {"status": "UP", "uptime_str": uptime_str, "startup_time": startup_time.isoformat()}
+            except Exception as e:
+                # Si erreur de droits (ORA-00942), la base est quand même en ligne vu qu'on s'y est connecté !
                 conn.close()
-                return {"status": "UP", "uptime_str": uptime_str, "startup_time": startup_time.isoformat()}
+                return {"status": "UP", "uptime_str": "Droits V$ limités", "startup_time": None}
         else: # MYSQL
             uptime_sec = 0
             try:
@@ -500,6 +357,34 @@ def get_all_metriques():
     finally:
         if 'cursor' in locals(): cursor.close()
 
+def get_scripts_categorizes():
+    conn = get_oracle_connection()
+    try:
+        cursor = conn.cursor()
+        sql = """
+            SELECT m.ID_METRIQUE, m.NOM_METRIQUE, m.SCRIPT_SQL, tm.NOM_TYPE_METRIQUE 
+            FROM METRIQUE m 
+            LEFT JOIN TYPE_METRIQUE tm ON m.ID_TYPE_METRIQUE = tm.ID_TYPE_METRIQUE
+        """
+        cursor.execute(sql)
+        res = {}
+        for r in cursor.fetchall():
+            cat = r[3] if r[3] else "Autres"
+            if cat not in res:
+                res[cat] = []
+            script = r[2].read() if hasattr(r[2], 'read') else str(r[2])
+            res[cat].append({
+                "id": r[0],
+                "nom": r[1],
+                "code": script
+            })
+        return res
+    except Exception as e:
+        print(f"Erreur get_scripts_categorizes : {e}")
+        return {}
+    finally:
+        if 'cursor' in locals(): cursor.close()
+
 def ajouter_metrique(nom, script_sql, id_type_base, id_type_metrique=2):
     conn = get_oracle_connection()
     try:
@@ -545,6 +430,32 @@ def executer_script_sur_cible(id_base, script_sql):
         conn_cible.close()
         return df.to_dict(orient='records'), None
     except Exception as e: return None, str(e)
+
+def executer_audit_granulaire(id_base, scripts_list):
+    conn_cible, type_db, erreur = get_db_connection(id_base)
+    if erreur: return False, erreur, None
+    results = {}
+    try:
+        # Prevent "Unable to evaluate dynamically wrapped function" errors in some pandas versions
+        # by manually configuring how long we might wait, but read_sql primarily relies on engine
+        import pandas as pd
+        for s in scripts_list:
+            nom_script = s.get("nom", "Script Inconnu")
+            code_sql = s.get("code", "")
+            if not code_sql:
+                continue
+            try:
+                df = pd.read_sql(code_sql, con=conn_cible)
+                results[nom_script] = df.to_dict(orient='records')
+            except Exception as e:
+                # Keep going if a script fails
+                results[nom_script] = [{"Erreur": str(e)}]
+        return True, "Audit granulaire terminé avec succès.", results
+    except Exception as e:
+        return False, str(e), None
+    finally:
+        if conn_cible:
+            conn_cible.close()
 
 def verifier_index_tables(id_base, sql_script):
     creds = get_target_credentials(id_base)
@@ -810,142 +721,16 @@ class AuditPDF(FPDF):
 
 def executer_audit_complet(id_base):
     """
-    Récupère l'intégralité des métriques pour les 6 catégories du dashboard.
+    Simule l'ancien audit pour ne pas casser l'API, mais renvoie des données vides car les scripts sont gérés dynamiquement dorénavant.
     """
-    conn, db_type, err = get_db_connection(id_base)
-    if err or not conn:
-        return False, f"Inaccessible : {err}", None
-        
-    try:
-        cursor = conn.cursor()
-        
-        # 1. PERFORMANCE
-        performance = {"cpu": 0, "ram": 0, "iops": []}
-        try:
-            # CPU/RAM existants
-            perf_cpu = get_cpu_stats(id_base)
-            perf_ram = get_ram_stats(id_base)
-            performance["cpu"] = perf_cpu if perf_cpu else {}
-            performance["ram"] = perf_ram if perf_ram else {}
-            
-            # IOPS via v$sysmetric
-            cursor.execute("SELECT METRIC_NAME, ROUND(VALUE,2) FROM v$sysmetric WHERE METRIC_NAME IN ('Physical Reads Per Sec', 'Physical Writes Per Sec') AND GROUP_ID = 2")
-            iops_data = {row[0]: row[1] for row in cursor.fetchall()}
-            performance["iops_reads"] = iops_data.get('Physical Reads Per Sec', 0)
-            performance["iops_writes"] = iops_data.get('Physical Writes Per Sec', 0)
-        except: performance["error"] = "Performance partial fail"
-
-        # 2. STOCKAGE
-        storage = {}
-        try:
-            cursor.execute("SELECT ROUND(SUM(BYTES)/1024/1024/1024, 2) FROM dba_data_files")
-            storage["total_gb"] = cursor.fetchone()[0] or 0
-            
-            cursor.execute("SELECT ROUND(SUM(BYTES)/1024/1024/1024, 2) FROM dba_free_space")
-            storage["free_gb"] = cursor.fetchone()[0] or 0
-            
-            cursor.execute("SELECT segment_type, ROUND(SUM(bytes)/1024/1024, 2) FROM dba_segments GROUP BY segment_type")
-            storage["segments"] = [{"type": r[0], "mb": r[1]} for r in cursor.fetchall()]
-            
-            storage["compression_ratio"] = 42.5 # Mock as requested
-            storage["growth_data"] = [12, 15, 10, 22, 18, 5, 8] # Mock 7 days
-        except: storage["error"] = "Storage fail (Check DBA privileges)"
-
-        # 3. REQUÊTES
-        queries = {}
-        try:
-            cursor.execute("SELECT ROUND(VALUE, 2) FROM v$sysmetric WHERE METRIC_NAME = 'Buffer Cache Hit Ratio' AND GROUP_ID = 2")
-            queries["cache_hit_ratio"] = cursor.fetchone()[0] or 0
-            
-            cursor.execute("""
-                SELECT SQL_ID, ROUND(ELAPSED_TIME/1000000, 2), SUBSTR(SQL_TEXT,1,100) 
-                FROM (
-                    SELECT * FROM v$sql 
-                    WHERE PARSING_SCHEMA_NAME IS NOT NULL
-                    AND PARSING_SCHEMA_NAME NOT IN ('SYS', 'SYSTEM', 'DBSNMP', 'SYSMAN', 'OUTLN', 'MDSYS', 'ORDSYS', 'EXFSYS', 'WMSYS', 'APPQOSSYS', 'DBSFWUSER', 'XDB')
-                    AND COMMAND_TYPE IN (2, 3, 6, 7, 189)
-                    ORDER BY ELAPSED_TIME DESC
-                ) 
-                WHERE ROWNUM <= 5
-            """)
-            queries["slow_queries"] = [{"sql_id": r[0], "elapsed": r[1], "text": r[2]} for r in cursor.fetchall()]
-        except: queries["error"] = "Queries fail"
-
-        # 4. CONNEXIONS
-        connections = {}
-        try:
-            cursor.execute("SELECT STATUS, COUNT(*) FROM v$session WHERE USERNAME IS NOT NULL GROUP BY STATUS")
-            connections["status"] = {row[0]: row[1] for row in cursor.fetchall()}
-            
-            # Sessions bloquées
-            try:
-                cursor.execute("SELECT COUNT(*) FROM v$session WHERE blocking_session IS NOT NULL")
-                connections["blocked"] = cursor.fetchone()[0] or 0
-            except:
-                connections["blocked"] = 0
-            
-            cursor.execute("SELECT VALUE FROM v$sysstat WHERE NAME = 'logons (failed)'")
-            connections["failed_logons"] = cursor.fetchone()[0] or 0
-
-            # Détails sessions actives (Oracle uniquement)
-            if db_type == "ORACLE":
-                cursor.execute("""
-                    SELECT SID, SERIAL#, USERNAME, OSUSER, MACHINE, PROGRAM, 
-                           TO_CHAR(LOGON_TIME, 'YYYY-MM-DD HH24:MI:SS') as LOGON_TIME 
-                    FROM V$SESSION 
-                    WHERE USERNAME IS NOT NULL AND STATUS = 'ACTIVE'
-                """)
-                connections["active_sessions_details"] = [
-                    {
-                        "sid": r[0], "serial": r[1], "username": r[2], 
-                        "osuser": r[3], "machine": r[4], "program": r[5], 
-                        "logon_time": r[6]
-                    } for r in cursor.fetchall()
-                ]
-            else:
-                # Fallback MySQL (approximation)
-                cursor.execute("SELECT ID, USER, HOST, DB, COMMAND, TIME, STATE FROM information_schema.processlist WHERE COMMAND != 'Sleep'")
-                connections["active_sessions_details"] = [
-                    {
-                        "sid": r[0], "serial": 0, "username": r[1], 
-                        "osuser": "N/A", "machine": r[2], "program": r[4], 
-                        "logon_time": str(r[5]) + "s"
-                    } for r in cursor.fetchall()
-                ]
-        except: connections["error"] = "Connections fail"
-
-        # 5. RÉPLICATION / HA
-        replication = {"status": "UNKNOWN"}
-        try:
-            cursor.execute("SELECT NAME, VALUE, UNIT FROM v$dataguard_stats")
-            rows = cursor.fetchall()
-            if rows:
-                replication["status"] = "ACTIVE"
-                replication["stats"] = [{"name": r[0], "value": r[1], "unit": r[2]} for r in rows]
-            else:
-                replication["status"] = "NOT_CONFIGURED"
-        except: replication["status"] = "NOT_AVAILABLE"
-
-        # 6. MÉTRIQUES MÉTIER
-        business = {}
-        try:
-            # Placeholder queries
-            business["active_users"] = 125 # Mock
-            business["daily_transactions"] = 4500 # Mock
-        except: business["error"] = "Business fail"
-
-        conn.close()
-        return True, "Collecte complète terminée", {
-            "performance": performance,
-            "storage": storage,
-            "queries": queries,
-            "connections": connections,
-            "replication": replication,
-            "business": business
-        }
-    except Exception as e:
-        if conn: conn.close()
-        return False, str(e), None
+    return True, "Audit statique obsolète (Utilisez l'audit granulaire)", {
+        "performance": {},
+        "storage": {},
+        "queries": {},
+        "connections": {},
+        "replication": {"status": "NOT_AVAILABLE"},
+        "business": {}
+    }
 
 def flatten_dict(d, parent_key='', sep='.'):
     items = []
