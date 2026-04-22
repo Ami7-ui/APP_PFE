@@ -1,7 +1,7 @@
 import React from 'react';
 // NOUVEAU : Ajout de l'icône Bot pour l'IA
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, ShieldCheck, Settings, Database, Code, Users, LogOut, Shield, Bot, FileText } from 'lucide-react'; 
+import { LayoutDashboard, ShieldCheck, Settings, Database, Code, Users, LogOut, Shield, Bot, FileText, Activity } from 'lucide-react'; 
 
 const ROLE_COLORS = {
   super_admin: '#ef4444', admin: '#f59e0b', consultant: '#0ea5e9', dba: '#10b981'
@@ -19,6 +19,7 @@ const NAV_ITEMS = [
   { key: 'users',         label: 'Contrôle Accès',         Icon: Users,           roles: ['super_admin'] },
   { key: 'assistant-ia',  label: 'Assistant IA',           Icon: Bot,             roles: ['super_admin','admin','consultant','dba'] }, 
   { key: 'reports-history', label: 'Historique Rapports',  Icon: FileText,        roles: ['super_admin','admin','consultant','dba'] },
+  { key: 'sql-phv',       label: 'Analyse PHV',            Icon: Activity,        roles: ['super_admin','admin','consultant','dba'] },
 ];
 
 export default function Sidebar({ user, onLogout }) {

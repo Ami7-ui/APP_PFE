@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../api';
 import GlassCard from '../components/GlassCard';
-import { Settings2, Database, Play, CheckCircle, Terminal, AlertCircle, Loader2, ChevronDown, ChevronUp, CheckSquare, Square, Search } from 'lucide-react';
+import { Settings2, Database, Play, CheckCircle, Terminal, AlertCircle, Loader2, ChevronDown, ChevronUp, CheckSquare, Square, Search, X, ChevronRight, GitBranch } from 'lucide-react';
 
 export default function ConfigurationPage() {
   const [bases, setBases] = useState([]);
@@ -16,6 +16,16 @@ export default function ConfigurationPage() {
   
   // Ref pour fermer le dropdown si on clique en dehors
   const dropdownRef = useRef(null);
+
+  // Modal states
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalSqlId, setModalSqlId] = useState('');
+  const [phvs, setPhvs] = useState([]);
+  const [loadingPhvs, setLoadingPhvs] = useState(false);
+  const [selectedPhv, setSelectedPhv] = useState(null);
+  const [planDetails, setPlanDetails] = useState(null);
+  const [loadingPlan, setLoadingPlan] = useState(false);
+  const [modalError, setModalError] = useState('');
 
   useEffect(() => {
     // Charger les bases
@@ -80,6 +90,53 @@ export default function ConfigurationPage() {
     } finally { 
       setLoading(false); 
     }
+  };
+
+  const openPlanModal = (sqlId) => {
+    setModalSqlId(sqlId);
+    setModalOpen(true);
+    setPhvs([]);
+    setSelectedPhv(null);
+    setPlanDetails(null);
+    setModalError('');
+    setLoadingPhvs(true);
+
+    api.get(`/api/sql-phvs/${selectedBase}/${sqlId}`)
+      .then(r => {
+        setPhvs(r.data.phvs || []);
+      })
+      .catch(err => {
+        setModalError("Erreur lors de la récupération des PHVs.");
+      })
+      .finally(() => setLoadingPhvs(false));
+  };
+
+  const fetchPlanDetails = (phv) => {
+    setSelectedPhv(phv);
+    setLoadingPlan(true);
+    setPlanDetails(null);
+    setModalError('');
+
+    api.get(`/api/sql-plan-details/${selectedBase}?sql_id=${modalSqlId}&phv=${phv}`)
+      .then(r => {
+        const rawData = r.data.data || [];
+        const nodeMap = {};
+        rawData.forEach(node => {
+          node.depth = 0;
+          nodeMap[node.ID || node.id] = node;
+        });
+        rawData.forEach(node => {
+          const pId = node.PARENT_ID !== undefined ? node.PARENT_ID : node.parent_id;
+          if (pId !== null && pId !== undefined && nodeMap[pId]) {
+            node.depth = nodeMap[pId].depth + 1;
+          }
+        });
+        setPlanDetails(rawData);
+      })
+      .catch(err => {
+        setModalError("Erreur lors du chargement du plan.");
+      })
+      .finally(() => setLoadingPlan(false));
   };
 
   const totalScripts = Object.values(categories).reduce((acc, cat) => acc + cat.length, 0);
@@ -276,11 +333,23 @@ export default function ConfigurationPage() {
                          </thead>
                          <tbody>{dataArray.map((r,i) => (
                            <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
-                             {Object.values(r).map((v,j) => (
-                               <td key={j} style={{ padding: '8px 14px', color: '#cbd5e1', whiteSpace: 'nowrap', fontFamily: typeof v === 'number' ? "'Fira Code', monospace" : 'inherit' }}>
-                                 {v !== null ? String(v) : <span style={{ color: '#64748b' }}>NULL</span>}
-                               </td>
-                             ))}
+                             {Object.keys(dataArray[0]).map((k, j) => {
+                               const v = r[k];
+                               return (
+                                 <td key={j} style={{ padding: '8px 14px', color: '#cbd5e1', whiteSpace: 'nowrap', fontFamily: typeof v === 'number' ? "'Fira Code', monospace" : 'inherit' }}>
+                                   {v != null ? (
+                                     k.toUpperCase() === 'SQL_ID' ? (
+                                       <button 
+                                         onClick={() => openPlanModal(String(v))}
+                                         style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', padding: 0, textDecoration: 'underline', fontWeight: 600 }}
+                                       >
+                                         {String(v)}
+                                       </button>
+                                     ) : String(v)
+                                   ) : <span style={{ color: '#64748b' }}>NULL</span>}
+                                 </td>
+                               );
+                             })}
                            </tr>
                          ))}</tbody>
                       </table>
@@ -315,6 +384,136 @@ export default function ConfigurationPage() {
           )}
         </div>
       </div>
+
+      {/* SQL PLAN MODAL */}
+      {modalOpen && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(2, 6, 23, 0.8)', backdropFilter: 'blur(10px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 1000, padding: '20px'
+        }}>
+          <GlassCard style={{ width: '100%', maxWidth: '1000px', height: '80vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0 }}>
+            <div style={{ padding: '20px', borderBottom: '1px solid rgba(255,255,255,0.05)', background: 'rgba(15, 23, 42, 0.5)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+               <div>
+                  <h2 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    Détails de la requête : {modalSqlId}
+                  </h2>
+               </div>
+               <button onClick={() => setModalOpen(false)} style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', padding: '4px' }}>
+                  <X size={20} />
+               </button>
+            </div>
+            
+            <div style={{ padding: '20px', borderBottom: '1px solid rgba(255,255,255,0.05)', background: 'rgba(15, 23, 42, 0.3)' }}>
+               {modalError && <div className="alert alert-error" style={{ marginBottom: 16 }}><AlertCircle size={16} /> {modalError}</div>}
+               <div style={{ color: '#e2e8f0', fontSize: '0.9rem', marginBottom: '8px', fontWeight: 600 }}>PHVs disponibles :</div>
+               {loadingPhvs ? (
+                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#94a3b8', fontSize: '0.85rem' }}><Loader2 size={16} className="spinner" /> Recherche des PHVs...</div>
+               ) : phvs.length > 0 ? (
+                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                   {phvs.map(p => (
+                     <button
+                       key={p}
+                       onClick={() => fetchPlanDetails(p)}
+                       style={{
+                         border: selectedPhv === p ? '1px solid #38bdf8' : '1px solid rgba(255,255,255,0.1)',
+                         background: selectedPhv === p ? 'rgba(56, 189, 248, 0.15)' : 'rgba(15, 23, 42, 0.6)',
+                         color: selectedPhv === p ? '#38bdf8' : '#94a3b8',
+                         padding: '6px 14px', borderRadius: '8px', fontSize: '0.85rem', cursor: 'pointer', fontFamily: "monospace",
+                         transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: '6px'
+                       }}
+                     >
+                       <GitBranch size={14} /> {p}
+                     </button>
+                   ))}
+                 </div>
+               ) : (
+                 <div style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Aucun plan disponible en mémoire / historique.</div>
+               )}
+            </div>
+
+            <div style={{ flex: 1, padding: 0, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+               {loadingPlan ? (
+                 <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+                   <div style={{ padding: '20px', background: 'rgba(15, 23, 42, 0.8)', borderRadius: '16px', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                     <Loader2 size={36} className="spinner" color="#38bdf8" />
+                   </div>
+                   <span style={{ color: '#94a3b8', fontWeight: 600 }}>Récupération de l'arbre...</span>
+                 </div>
+               ) : planDetails ? (
+                 planDetails.length === 0 ? (
+                    <div style={{ margin: 'auto', textAlign: 'center', color: '#64748b' }}>
+                      Le plan demandé est introuvable.
+                    </div>
+                 ) : (
+                   <div style={{ overflowX: 'auto', overflowY: 'auto', flex: 1, height: '100%', background: '#020617' }}>
+                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', minWidth: '800px' }}>
+                       <thead style={{ position: 'sticky', top: 0, background: 'rgba(15, 23, 42, 0.95)', zIndex: 10, backdropFilter: 'blur(5px)' }}>
+                         <tr>
+                           <th style={{ padding: '10px 16px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Operation (Options)</th>
+                           <th style={{ padding: '10px 16px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Object Name</th>
+                           <th style={{ padding: '10px 16px', textAlign: 'right', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Cost</th>
+                           <th style={{ padding: '10px 16px', textAlign: 'right', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Rows</th>
+                           <th style={{ padding: '10px 16px', textAlign: 'right', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Bytes</th>
+                         </tr>
+                       </thead>
+                       <tbody>
+                         {planDetails.map((node, i) => {
+                           const depth = node.depth || 0;
+                           const operation = node.OPERATION || node.operation;
+                           const options = node.OPTIONS || node.options;
+                           const opLabel = options ? `${operation} (${options})` : operation;
+                           
+                           const objName = node.OBJECT_NAME || node.object_name;
+                           const cost = node.COST || node.cost;
+                           const card = node.CARDINALITY || node.cardinality;
+                           const bytes = node.BYTES || node.bytes;
+                           
+                           // Ligne accentuée si c'est un Full Table Scan
+                           const isFTS = opLabel.toUpperCase().includes('FULL');
+                           
+                           return (
+                             <tr key={i} style={{ 
+                                 borderBottom: '1px solid rgba(255,255,255,0.02)',
+                                 background: isFTS ? 'rgba(239, 68, 68, 0.05)' : 'transparent'
+                             }}>
+                               <td style={{ 
+                                 padding: '8px 16px', 
+                                 paddingLeft: `${16 + depth * 24}px`, 
+                                 color: isFTS ? '#ef4444' : '#e2e8f0',
+                                 fontFamily: 'monospace',
+                                 display: 'flex',
+                                 alignItems: 'center',
+                                 gap: '8px'
+                               }}>
+                                 {/* Lignes d'arborescence structurelles */}
+                                 {depth > 0 && <span style={{ color: 'rgba(255,255,255,0.15)' }}>└─</span>}
+                                 {opLabel}
+                               </td>
+                               <td style={{ padding: '8px 16px', color: '#38bdf8', fontWeight: 600 }}>{objName || '-'}</td>
+                               <td style={{ padding: '8px 16px', textAlign: 'right', color: '#cbd5e1' }}>{cost || '-'}</td>
+                               <td style={{ padding: '8px 16px', textAlign: 'right', color: '#cbd5e1' }}>{card || '-'}</td>
+                               <td style={{ padding: '8px 16px', textAlign: 'right', color: '#cbd5e1' }}>{bytes || '-'}</td>
+                             </tr>
+                           );
+                         })}
+                       </tbody>
+                     </table>
+                   </div>
+                 )
+               ) : (
+                 <div style={{ m: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', opacity: 0.5 }}>
+                   <p style={{ color: '#94a3b8', fontSize: '1.2rem', fontWeight: 600 }}>Aucun plan sélectionné</p>
+                   <p style={{ color: '#64748b', fontSize: '0.9rem', maxWidth: '300px', textAlign: 'center', marginTop: '10px' }}>
+                     Cliquez sur un tag PHV en haut pour visualiser son arbre détaillé ici.
+                   </p>
+                 </div>
+               )}
+            </div>
+          </GlassCard>
+        </div>
+      )}
     </div>
   );
 }

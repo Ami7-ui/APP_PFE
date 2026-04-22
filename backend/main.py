@@ -213,6 +213,24 @@ async def get_execution_plan(id_base: int, sql_id: str):
     if error: raise HTTPException(status_code=400, detail=f"Erreur Oracle: {error}")
     return {"plan": plan_data}
 
+@app.get("/api/sql-phv-list/{id_base}")
+async def sql_phv_list(id_base: int):
+    data, err = db_functions.get_sql_phv_list(id_base)
+    if err: raise HTTPException(status_code=400, detail=f"Erreur DB: {err}")
+    return {"data": data}
+
+@app.get("/api/sql-phvs/{id_base}/{sql_id}")
+async def sql_phvs(id_base: int, sql_id: str):
+    phvs, err = db_functions.get_sql_phvs_for_id(id_base, sql_id)
+    if err: raise HTTPException(status_code=400, detail=f"Erreur DB: {err}")
+    return {"phvs": phvs}
+
+@app.get("/api/sql-plan-details/{id_base}")
+async def sql_plan_details(id_base: int, sql_id: str, phv: str):
+    data, err = db_functions.get_sql_plan_details(id_base, sql_id, phv)
+    if err: raise HTTPException(status_code=400, detail=f"Erreur DB: {err}")
+    return {"data": data}
+
 @app.get("/api/diagnostics/scripts")
 def get_diagnostics_scripts():
     return db_functions.get_scripts_categorizes()
@@ -238,7 +256,19 @@ def add_script(req: ScriptRequest):
     ok, msg = db_functions.ajouter_metrique(req.Nom_Scripte, req.Contenu_Script, req.id_type_base, req.id_type_metrique)
     if not ok: raise HTTPException(status_code=400, detail=msg)
     return {"message": msg}
+@app.put("/api/scripts/{script_id}")
+def update_script(script_id: int, req: ScriptRequest):
+    ok, msg = db_functions.modifier_metrique(script_id, req.Nom_Scripte, req.Contenu_Script, req.id_type_base, req.id_type_metrique)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"message": msg}
 
+@app.delete("/api/scripts/{script_id}")
+def delete_script(script_id: int):
+    ok, msg = db_functions.supprimer_metrique(script_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"message": msg}
 @app.post("/api/scripts/upload-zip")
 async def upload_scripts_zip(file: UploadFile = File(...), db_type: str = Form(...)):
     if not file.filename.endswith('.zip'):

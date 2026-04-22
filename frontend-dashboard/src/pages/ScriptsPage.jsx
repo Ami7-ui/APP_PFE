@@ -11,34 +11,73 @@ export default function ScriptsPage() {
   const [form, setForm]       = useState({ Nom_Scripte: '', id_type_base: '', Contenu_Script: '' });
   const [editId, setEditId]   = useState(null);
   const [error, setError]     = useState('');
+  const [success, setSuccess] = useState('');
 
   useEffect(() => { load(); }, []);
 
-  const load = () => {
-    api.get('/api/scripts').then(r => setScripts(r.data));
-    api.get('/api/types_sgbd').then(r => setTypesBase(r.data));
+  // Auto-effacement des messages après 5 secondes
+  useEffect(() => {
+    if (error || success) {
+      const timer = setTimeout(() => {
+        setError('');
+        setSuccess('');
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [error, success]);
+
+  const load = async () => {
+    try {
+      const r = await api.get('/api/scripts');
+      setScripts(r.data);
+      const t = await api.get('/api/types_sgbd');
+      setTypesBase(t.data);
+    } catch (err) {
+      setError('Impossible de charger les données.');
+    }
   };
 
   const save = async (e) => {
-    e.preventDefault(); setError('');
+    e.preventDefault(); 
+    setError(''); 
+    setSuccess('');
     const payload = {
       Nom_Scripte: form.Nom_Scripte,
       Contenu_Script: form.Contenu_Script,
       id_type_base: parseInt(form.id_type_base)
     };
     try {
-      if(editId) await api.put(`/api/scripts/${editId}`, payload);
-      else await api.post('/api/scripts', payload);
+      if(editId) {
+        await api.put(`/api/scripts/${editId}`, payload);
+        setSuccess('Script mis à jour avec succès !');
+      } else {
+        await api.post('/api/scripts', payload);
+        setSuccess('Nouveau script créé avec succès !');
+      }
       setForm({ Nom_Scripte: '', id_type_base: '', Contenu_Script: '' });
       setEditId(null);
       load();
-    } catch { setError('Erreur de sauvegarde. Vérifiez les champs.'); }
+    } catch (err) { 
+      setError(err.response?.data?.detail || 'Erreur lors de la sauvegarde.'); 
+    }
   };
 
   const rm = async (id) => {
     if(!window.confirm('Supprimer ce script définitivement ?')) return;
-    try { await api.delete(`/api/scripts/${id}`); load(); }
-    catch { setError('Erreur de suppression.'); }
+    setError(''); 
+    setSuccess('');
+    try { 
+      const response = await api.delete(`/api/scripts/${id}`);
+      if (response.status === 200 || response.status === 204) {
+        setSuccess('Métrique supprimée avec succès !');
+        // Optionnel: mise à jour locale immédiate pour réactivité maximale
+        setScripts(prev => prev.filter(s => s.ID !== id));
+        // Rafraîchissement complet pour être sûr d'être synchro avec la base
+        load(); 
+      }
+    } catch (err) { 
+      setError(err.response?.data?.detail || 'Erreur lors de la suppression.'); 
+    }
   };
 
   const filteredScripts = filter === 'all' 
@@ -125,7 +164,16 @@ export default function ScriptsPage() {
             <Code2 size={20} color="#0ea5e9" />
             <h2 style={{ fontSize: '1.2rem', fontWeight: 700 }}>{editId ? 'Éditeur de Script' : 'Nouveau Script'}</h2>
           </div>
-          {error && <div className="alert alert-error" style={{ marginBottom: 20 }}>{error}</div>}
+          {error && (
+            <div className="alert alert-error" style={{ marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <X size={18} /> {error}
+            </div>
+          )}
+          {success && (
+            <div className="alert alert-success" style={{ marginBottom: 20, background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.3)', padding: '12px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Archive size={18} /> {success}
+            </div>
+          )}
           <form onSubmit={save}>
             <div className="form-grid-2">
               <div className="form-group">

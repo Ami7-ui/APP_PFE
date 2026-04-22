@@ -394,9 +394,12 @@ def ajouter_metrique(nom, script_sql, id_type_base, id_type_metrique=2):
         cursor.execute(sql, nom=nom, script=script_sql, base=id_type_base, met=mid)
         conn.commit()
         return True, "Script ajouté avec succès"
-    except Exception as e: return False, str(e)
+    except Exception as e: 
+        print(f"Erreur ajouter_metrique: {e}")
+        return False, str(e)
     finally:
         if 'cursor' in locals(): cursor.close()
+        if 'conn' in locals(): conn.close()
 
 def modifier_metrique(id_metrique, nom, script_sql, id_type_base, id_type_metrique=2):
     conn = get_oracle_connection()
@@ -405,22 +408,37 @@ def modifier_metrique(id_metrique, nom, script_sql, id_type_base, id_type_metriq
         mid = id_type_metrique if id_type_metrique else 2
         sql = "UPDATE METRIQUE SET NOM_METRIQUE=:nom, SCRIPT_SQL=:script, ID_TYPE_BASE=:base, ID_TYPE_METRIQUE=:met WHERE ID_METRIQUE=:id"
         cursor.execute(sql, nom=nom, script=script_sql, base=id_type_base, met=mid, id=id_metrique)
+        if cursor.rowcount == 0:
+            return False, f"Aucun script trouvé avec l'ID {id_metrique}"
         conn.commit()
         return True, "Script mis à jour avec succès"
-    except Exception as e: return False, str(e)
+    except Exception as e: 
+        print(f"Erreur modifier_metrique: {e}")
+        return False, str(e)
     finally:
         if 'cursor' in locals(): cursor.close()
+        if 'conn' in locals(): conn.close()
 
 def supprimer_metrique(id_metrique):
     conn = get_oracle_connection()
     try:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM METRIQUE WHERE ID_METRIQUE = :id", id=id_metrique)
+        if cursor.rowcount == 0:
+            return False, f"Aucun script trouvé avec l'ID {id_metrique}"
         conn.commit()
         return True, "Script supprimé avec succès"
-    except Exception as e: return False, str(e)
+    except Exception as e: 
+        err_msg = str(e)
+        if "ORA-02292" in err_msg:
+            friendly_msg = "Impossible de supprimer ce script : il est actuellement utilisé par un audit ou une autre ressource."
+        else:
+            friendly_msg = f"Erreur lors de la suppression : {err_msg}"
+        print(f"DEBUG: {friendly_msg}")
+        return False, friendly_msg
     finally:
         if 'cursor' in locals(): cursor.close()
+        if 'conn' in locals(): conn.close()
 
 def executer_script_sur_cible(id_base, script_sql):
     conn_cible, type_db, erreur = get_db_connection(id_base)
@@ -568,6 +586,121 @@ def get_sql_plan_by_id(id_base, sql_id):
         if conn: conn.close()
         return None, str(e)
     
+# ==========================================
+# 5. ANALYSE DES PLANS D'EXÉCUTION (PHV)
+# ==========================================
+
+def get_sql_phv_list(id_base):
+    conn, db_type, err = get_db_connection(id_base)
+    if err or not conn:
+        return None, err or "Inaccessible"
+    if db_type != "ORACLE":
+        return None, "L'analyse des PHV multiples est réservée à Oracle."
+
+    sql = """
+        SELECT 
+            sql_id,
+            COUNT(DISTINCT plan_hash_value) AS phv_count,
+            LISTAGG(DISTINCT plan_hash_value, ', ') 
+                WITHIN GROUP (ORDER BY plan_hash_value) AS phv_list
+        FROM v$sql
+        WHERE sql_id IS NOT NULL 
+          AND plan_hash_value <> 0
+        GROUP BY sql_id
+        HAVING COUNT(DISTINCT plan_hash_value) > 1
+        ORDER BY phv_count DESC, sql_id
+    """
+    try:
+        import pandas as pd
+        df = pd.read_sql(sql, con=conn)
+        conn.close()
+        return df.to_dict(orient='records'), None
+    except Exception as e:
+        if conn: conn.close()
+        return None, str(e)
+
+def get_sql_phvs_for_id(id_base, sql_id):
+    conn, db_type, err = get_db_connection(id_base)
+    if err or not conn:
+        return None, err or "Inaccessible"
+    if db_type != "ORACLE":
+        return [], None
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT plan_hash_value FROM v$sql_plan WHERE sql_id = :1 AND plan_hash_value <> 0", (sql_id,))
+        phvs = [str(r[0]) for r in cursor.fetchall() if r[0]]
+        if not phvs:
+            try:
+                cursor.execute("SELECT DISTINCT plan_hash_value FROM dba_hist_sql_plan WHERE sql_id = :1 AND plan_hash_value <> 0", (sql_id,))
+                phvs = [str(r[0]) for r in cursor.fetchall() if r[0]]
+            except Exception:
+                pass
+        conn.close()
+        return phvs, None
+    except Exception as e:
+        if conn: conn.close()
+        return None, str(e)
+
+def get_sql_plan_details(id_base, sql_id, phv):
+    conn, db_type, err = get_db_connection(id_base)
+    if err or not conn:
+        return None, err or "Inaccessible"
+    if db_type != "ORACLE":
+        return None, "Oracle uniquement."
+
+    sql = """
+        SELECT 
+            id, parent_id, operation, options, object_owner, 
+            object_name, object_type, optimizer, cost, cardinality, 
+            bytes, cpu_cost, io_cost, access_predicates, 
+            filter_predicates, projection, time
+        FROM 
+            v$sql_plan 
+        WHERE 
+            sql_id = :sql_id 
+            AND plan_hash_value = :phv
+            AND child_number = (
+                SELECT MIN(child_number) 
+                FROM v$sql_plan 
+                WHERE sql_id = :sql_id AND plan_hash_value = :phv
+            )
+        ORDER BY id
+    """
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, sql_id=sql_id, phv=phv)
+        columns = [col[0] for col in cursor.description]
+        rows = cursor.fetchall()
+        
+        if not rows:
+            sql_awr = """
+                SELECT 
+                    id, parent_id, operation, options, object_owner, 
+                    object_name, object_type, optimizer, cost, cardinality, 
+                    bytes, cpu_cost, io_cost, access_predicates, 
+                    filter_predicates, projection, time
+                FROM 
+                    dba_hist_sql_plan 
+                WHERE 
+                    sql_id = :sql_id 
+                    AND plan_hash_value = :phv
+                ORDER BY id
+            """
+            try:
+                cursor.execute(sql_awr, sql_id=sql_id, phv=phv)
+                rows = cursor.fetchall()
+            except Exception:
+                pass
+                
+        # Convert to dict
+        result = [dict(zip(columns, row)) for row in rows]
+        
+        conn.close()
+        return result, None
+    except Exception as e:
+        if conn: conn.close()
+        return None, str(e)
+
 # ==========================================
 # 7. HISTORIQUE DES RAPPORTS PDF
 # ==========================================
