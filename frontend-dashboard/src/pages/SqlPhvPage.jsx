@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api';
 import GlassCard from '../components/GlassCard';
-import { Activity, Database, LayoutList, ChevronRight, X, AlertCircle, Loader2, GitBranch } from 'lucide-react';
+import { Activity, Database, LayoutList, ChevronRight, ChevronDown, X, AlertCircle, Loader2, GitBranch, Code } from 'lucide-react';
 
 export default function SqlPhvPage() {
   const [bases, setBases] = useState([]);
@@ -14,6 +14,7 @@ export default function SqlPhvPage() {
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [selectedSqlId, setSelectedSqlId] = useState(null);
   const [selectedPhv, setSelectedPhv] = useState(null);
+  const [expandedSqlId, setExpandedSqlId] = useState(null);
 
   const [error, setError] = useState('');
 
@@ -157,54 +158,100 @@ export default function SqlPhvPage() {
                     {phvList.map((row, idx) => {
                       const sqlId = row.SQL_ID || row.sql_id;
                       const phvs = (row.PHV_LIST || row.phv_list || "").split(',').map(s => s.trim());
+                      const scriptSql = row.SCRIPT_SQL || row.script_sql;
                       const isActive = selectedSqlId === sqlId;
+                      const isExpanded = expandedSqlId === sqlId;
                       
                       return (
-                        <tr key={idx} style={{ 
-                          borderBottom: '1px solid rgba(255,255,255,0.02)',
-                          background: isActive ? 'rgba(139, 92, 246, 0.05)' : 'transparent',
-                          transition: 'background 0.2s'
-                        }}>
-                          <td style={{ padding: '12px 16px', color: isActive ? '#a78bfa' : '#cbd5e1', fontWeight: isActive ? 600 : 400, fontFamily: "monospace" }}>
-                            {sqlId}
-                          </td>
-                          <td style={{ padding: '12px 16px', textAlign: 'center', color: '#e2e8f0' }}>
-                            <span style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem' }}>
-                              {row.PHV_COUNT || row.phv_count}
-                            </span>
-                          </td>
-                          <td style={{ padding: '10px 16px' }}>
-                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                              {phvs.map((p, i) => (
-                                <button
-                                  key={i}
-                                  onClick={() => fetchPlanDetails(sqlId, p)}
-                                  style={{
-                                    border: (selectedSqlId === sqlId && selectedPhv === p) ? '1px solid #38bdf8' : '1px solid rgba(255,255,255,0.1)',
-                                    background: (selectedSqlId === sqlId && selectedPhv === p) ? 'rgba(56, 189, 248, 0.15)' : 'rgba(15, 23, 42, 0.6)',
-                                    color: (selectedSqlId === sqlId && selectedPhv === p) ? '#38bdf8' : '#94a3b8',
-                                    padding: '4px 10px', borderRadius: '6px', fontSize: '0.75rem', cursor: 'pointer', fontFamily: "monospace",
-                                    transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: '4px'
+                        <React.Fragment key={idx}>
+                          <tr style={{ 
+                            borderBottom: isExpanded ? 'none' : '1px solid rgba(255,255,255,0.02)',
+                            background: isActive ? 'rgba(139, 92, 246, 0.05)' : 'transparent',
+                            transition: 'background 0.2s'
+                          }}>
+                            <td style={{ padding: '12px 16px', color: isActive ? '#a78bfa' : '#cbd5e1', fontWeight: isActive ? 600 : 400, fontFamily: "monospace" }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); setExpandedSqlId(isExpanded ? null : sqlId); }}
+                                  style={{ 
+                                    background: isExpanded ? 'rgba(56, 189, 248, 0.2)' : 'rgba(56, 189, 248, 0.1)', 
+                                    border: '1px solid rgba(56, 189, 248, 0.2)', 
+                                    color: '#38bdf8', 
+                                    cursor: 'pointer', 
+                                    padding: '4px', 
+                                    borderRadius: '6px', 
+                                    display: 'flex', 
+                                    alignItems: 'center',
+                                    transition: 'all 0.2s'
                                   }}
-                                  onMouseEnter={(e) => {
-                                    if (!(selectedSqlId === sqlId && selectedPhv === p)) {
-                                      e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-                                      e.currentTarget.style.color = '#e2e8f0';
-                                    }
-                                  }}
-                                  onMouseLeave={(e) => {
-                                    if (!(selectedSqlId === sqlId && selectedPhv === p)) {
-                                      e.currentTarget.style.background = 'rgba(15, 23, 42, 0.6)';
-                                      e.currentTarget.style.color = '#94a3b8';
-                                    }
-                                  }}
+                                  title="Voir le script SQL"
+                                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(56, 189, 248, 0.3)'}
+                                  onMouseLeave={e => e.currentTarget.style.background = isExpanded ? 'rgba(56, 189, 248, 0.2)' : 'rgba(56, 189, 248, 0.1)'}
                                 >
-                                  <GitBranch size={12} /> {p}
+                                  {isExpanded ? <ChevronDown size={14} /> : <Code size={14} />}
                                 </button>
-                              ))}
-                            </div>
-                          </td>
-                        </tr>
+                                {sqlId}
+                              </div>
+                            </td>
+                            <td style={{ padding: '12px 16px', textAlign: 'center', color: '#e2e8f0' }}>
+                              <span style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem' }}>
+                                {row.PHV_COUNT || row.phv_count}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 16px' }}>
+                              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                {phvs.map((p, i) => (
+                                  <button
+                                    key={i}
+                                    onClick={() => fetchPlanDetails(sqlId, p)}
+                                    style={{
+                                      border: (selectedSqlId === sqlId && selectedPhv === p) ? '1px solid #38bdf8' : '1px solid rgba(255,255,255,0.1)',
+                                      background: (selectedSqlId === sqlId && selectedPhv === p) ? 'rgba(56, 189, 248, 0.15)' : 'rgba(15, 23, 42, 0.6)',
+                                      color: (selectedSqlId === sqlId && selectedPhv === p) ? '#38bdf8' : '#94a3b8',
+                                      padding: '4px 10px', borderRadius: '6px', fontSize: '0.75rem', cursor: 'pointer', fontFamily: "monospace",
+                                      transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: '4px'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      if (!(selectedSqlId === sqlId && selectedPhv === p)) {
+                                        e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                                        e.currentTarget.style.color = '#e2e8f0';
+                                      }
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      if (!(selectedSqlId === sqlId && selectedPhv === p)) {
+                                        e.currentTarget.style.background = 'rgba(15, 23, 42, 0.6)';
+                                        e.currentTarget.style.color = '#94a3b8';
+                                      }
+                                    }}
+                                  >
+                                    <GitBranch size={12} /> {p}
+                                  </button>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                          {isExpanded && (
+                            <tr style={{ background: isActive ? 'rgba(139, 92, 246, 0.05)' : 'transparent' }}>
+                              <td colSpan={3} style={{ padding: '0 16px 16px 16px', borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
+                                <div style={{ 
+                                  background: 'rgba(15, 23, 42, 0.8)', 
+                                  padding: '16px', 
+                                  borderRadius: '8px', 
+                                  border: '1px solid rgba(56, 189, 248, 0.2)', 
+                                  fontSize: '0.8rem', 
+                                  color: '#e2e8f0', 
+                                  fontFamily: 'monospace', 
+                                  whiteSpace: 'pre-wrap', 
+                                  maxHeight: '200px', 
+                                  overflowY: 'auto',
+                                  boxShadow: 'inset 0 0 10px rgba(0,0,0,0.5)'
+                                }}>
+                                  {scriptSql ? scriptSql : <span style={{ color: '#64748b', fontStyle: 'italic' }}>Script SQL non disponible</span>}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
                       );
                     })}
                   </tbody>

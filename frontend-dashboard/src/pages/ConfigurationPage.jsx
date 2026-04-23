@@ -195,9 +195,34 @@ export default function ConfigurationPage() {
             </div>
 
             <div style={{ height: '1px', background: 'rgba(255,255,255,0.05)', margin: '20px 0' }} />
-            <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#94a3b8', marginBottom: '16px' }}>
-              <Terminal size={14} /> 2. Sélectionner les scripts ({selectedScripts.length} choisis)
-            </label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#94a3b8', margin: 0 }}>
+                <Terminal size={14} /> 2. Sélectionner les scripts ({selectedScripts.length} choisis)
+              </label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button 
+                  type="button"
+                  onClick={() => {
+                    const allScripts = Object.values(categories).flat();
+                    setSelectedScripts(allScripts);
+                  }}
+                  className="btn btn-ghost"
+                  style={{ padding: '4px 8px', fontSize: '0.75rem', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}
+                >
+                  Tout sélectionner
+                </button>
+                {selectedScripts.length > 0 && (
+                  <button 
+                    type="button"
+                    onClick={() => setSelectedScripts([])}
+                    className="btn btn-ghost"
+                    style={{ padding: '4px 8px', fontSize: '0.75rem', color: '#94a3b8', border: '1px solid rgba(148, 163, 184, 0.3)' }}
+                  >
+                    Effacer
+                  </button>
+                )}
+              </div>
+            </div>
 
             {/* LISTES DÉROULANTES MULTIPLES */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>

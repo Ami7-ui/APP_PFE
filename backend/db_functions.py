@@ -493,99 +493,7 @@ def verifier_index_tables(id_base, sql_script):
         return results
     except Exception as e: return {"error": str(e)}
 
-import pandas as pd
-
-def get_explain_plan(id_base, sql_query):
-    query_clean = sql_query.strip().rstrip(';')
-    conn, db_type, err = get_db_connection(id_base)
-    if err or not conn: return None, err or "Inaccessible"
-    
-    try:
-        cursor = conn.cursor()
-        if db_type == "ORACLE":
-            # Cette méthode reste parfaite pour évaluer un texte SQL brut
-            cursor.execute(f"EXPLAIN PLAN FOR {query_clean}")
-            cursor.execute("SELECT PLAN_TABLE_OUTPUT FROM TABLE(DBMS_XPLAN.DISPLAY())")
-            plan_text = "\n".join([str(r[0]) for r in cursor.fetchall()])
-        else: # MYSQL
-            cursor.execute(f"EXPLAIN {query_clean}")
-            res = cursor.fetchall()
-            plan_text = "MYSQL EXPLAIN:\n" + "\n".join([str(r) for r in res])
-            
-        conn.close()
-        return plan_text, None
-    except Exception as e:
-        if conn: conn.close()
-        return None, str(e)
-
-
-def get_sql_plan_by_id(id_base, sql_id):
-    conn, db_type, err = get_db_connection(id_base)
-    if err or not conn: return None, err or "Inaccessible"
-    if db_type != "ORACLE": return "Oracle uniquement.", None
-    
-    try:
-        cursor = conn.cursor()
-        
-        # --- 1er ESSAI : Mémoire Vive (RAM) ---
-        try:
-            cursor.execute(f"SELECT PLAN_TABLE_OUTPUT FROM TABLE(DBMS_XPLAN.DISPLAY_CURSOR('{sql_id}', NULL, 'ALL'))")
-            plan_text = "\n".join([str(r[0]) for r in cursor.fetchall() if r[0] is not None])
-        except Exception:
-            plan_text = ""
-            
-        if not plan_text or "cannot fetch plan" in plan_text.lower():
-            
-            # --- 2ème ESSAI : Historique AWR ---
-            try:
-                cursor.execute(f"SELECT PLAN_TABLE_OUTPUT FROM TABLE(DBMS_XPLAN.DISPLAY_AWR('{sql_id}'))")
-                plan_text_awr = "\n".join([str(r[0]) for r in cursor.fetchall() if r[0] is not None])
-            except Exception:
-                plan_text_awr = ""
-                
-            if not plan_text_awr or "cannot fetch plan" in plan_text_awr.lower() or "no data found" in plan_text_awr.lower():
-                
-                # --- 3ème ESSAI (LA SOLUTION ULTIME) : Génération à la volée ---
-                try:
-                    # On cherche le texte de la requête dans la RAM
-                    cursor.execute(f"SELECT sql_fulltext FROM v$sql WHERE sql_id = '{sql_id}' AND ROWNUM = 1")
-                    row = cursor.fetchone()
-                    
-                    # Si introuvable en RAM, on cherche dans l'historique
-                    if not row:
-                        cursor.execute(f"SELECT sql_text FROM dba_hist_sqltext WHERE sql_id = '{sql_id}' AND ROWNUM = 1")
-                        row = cursor.fetchone()
-                    
-                    if row:
-                        sql_text = row[0].read() if hasattr(row[0], 'read') else str(row[0])
-                        clean_text = sql_text.strip().rstrip(';')
-                        
-                        # Vérifier que c'est une commande DML supportée par EXPLAIN PLAN
-                        first_word = clean_text.split()[0].upper() if clean_text.split() else ''
-                        supported_keywords = ('SELECT', 'INSERT', 'UPDATE', 'DELETE', 'MERGE', 'WITH')
-                        
-                        if first_word in supported_keywords:
-                            cursor.execute(f"EXPLAIN PLAN FOR {clean_text}")
-                            cursor.execute("SELECT PLAN_TABLE_OUTPUT FROM TABLE(DBMS_XPLAN.DISPLAY())")
-                            plan_text_fallback = "\n".join([str(r[0]) for r in cursor.fetchall() if r[0] is not None])
-                            plan_text = "--- PLAN GÉNÉRÉ À LA VOLÉE (Original expiré) ---\n" + plan_text_fallback
-                        else:
-                            plan_text = f"Le plan n'est plus en mémoire.\nType de requête non supporté par EXPLAIN PLAN ('{first_word}...'). Seuls SELECT, INSERT, UPDATE, DELETE et MERGE sont analysables."
-                    else:
-                        plan_text = f"Le plan n'est plus en mémoire et le texte de la requête (SQL_ID '{sql_id}') est introuvable."
-                
-                except Exception as e_fallback:
-                    plan_text = f"Le plan n'est plus en mémoire.\nErreur lors de la génération du plan à la volée : {str(e_fallback)}"
-            else:
-                plan_text = "--- PLAN RÉCUPÉRÉ DEPUIS L'HISTORIQUE (AWR) ---\n" + plan_text_awr
-                
-        conn.close()
-        return plan_text, None
-        
-    except Exception as e: 
-        if conn: conn.close()
-        return None, str(e)
-    
+import pandas as pd    
 # ==========================================
 # 5. ANALYSE DES PLANS D'EXÉCUTION (PHV)
 # ==========================================
@@ -599,16 +507,23 @@ def get_sql_phv_list(id_base):
 
     sql = """
         SELECT 
-            sql_id,
-            COUNT(DISTINCT plan_hash_value) AS phv_count,
-            LISTAGG(DISTINCT plan_hash_value, ', ') 
-                WITHIN GROUP (ORDER BY plan_hash_value) AS phv_list
-        FROM v$sql
-        WHERE sql_id IS NOT NULL 
-          AND plan_hash_value <> 0
-        GROUP BY sql_id
-        HAVING COUNT(DISTINCT plan_hash_value) > 1
-        ORDER BY phv_count DESC, sql_id
+    s.sql_id,
+    DBMS_LOB.SUBSTR(
+        (SELECT sql_fulltext 
+         FROM v$sql s2 
+         WHERE s2.sql_id = s.sql_id 
+           AND ROWNUM = 1),
+        1000, 1
+    ) AS script_sql,
+    COUNT(DISTINCT s.plan_hash_value) AS phv_count,
+    LISTAGG(DISTINCT s.plan_hash_value, ', ')
+        WITHIN GROUP (ORDER BY s.plan_hash_value) AS phv_list
+FROM v$sql s
+WHERE s.sql_id IS NOT NULL
+  AND s.plan_hash_value <> 0
+GROUP BY s.sql_id
+HAVING COUNT(DISTINCT s.plan_hash_value) > 1
+ORDER BY phv_count DESC, s.sql_id
     """
     try:
         import pandas as pd
