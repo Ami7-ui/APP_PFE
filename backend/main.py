@@ -85,6 +85,10 @@ class GranularAuditRequest(BaseModel):
     id_base: int
     scripts: List[dict]
 
+class GranularAIRequest(BaseModel):
+    id_base: int
+    results: dict
+
 # ── ROUTES AUTHENTIFICATION ───────────────────────────────────────────────────
 
 @app.post("/api/login")
@@ -319,6 +323,14 @@ async def analyze_sql(req: AnalysisRequest):
         # Analyse de performance SQL structurée
         analysis_result = ai_service.analyze_sql_performance(req.sql_query, plan)
         return {"plan_brut": plan, "analyse_ia": analysis_result}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/api/ai/analyze_granular")
+async def analyze_granular(req: GranularAIRequest):
+    try:
+        analysis_result = ai_service.analyze_granular_results(req.results)
+        return {"rapport_ia": analysis_result}
     except Exception as e:
         return {"error": str(e)}
 

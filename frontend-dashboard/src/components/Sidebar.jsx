@@ -12,7 +12,6 @@ const ROLE_LABELS = {
 
 const NAV_ITEMS = [
   { key: '',              label: 'Tableau de Bord',      Icon: LayoutDashboard, roles: ['super_admin','admin','consultant','dba'] },
-  { key: 'audit',         label: 'Audit Système',          Icon: ShieldCheck,     roles: ['super_admin','admin','consultant'] },
   { key: 'configuration', label: 'Diagnostics SQL',        Icon: Settings,        roles: ['super_admin','admin'] },
   { key: 'cibles',        label: 'Bases Cibles',           Icon: Database,        roles: ['super_admin','admin'] },
   { key: 'scripts',       label: 'Scripts Métriques',      Icon: Code,            roles: ['super_admin'] },

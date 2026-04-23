@@ -109,7 +109,7 @@ function AnalysisRenderer({ rapport_ia, analyse_ia, reponse, status, diagnostic_
         }}>
           {/* Accent glow */}
           <div style={{ position: 'absolute', top: -40, right: -40, width: 120, height: 120, borderRadius: '50%', background: 'rgba(139, 92, 246, 0.06)', filter: 'blur(40px)' }} />
-          
+
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', position: 'relative', zIndex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(139, 92, 246, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -154,7 +154,7 @@ function AnalysisRenderer({ rapport_ia, analyse_ia, reponse, status, diagnostic_
         }}>
           {/* Accent glow */}
           <div style={{ position: 'absolute', top: -40, right: -40, width: 120, height: 120, borderRadius: '50%', background: 'rgba(16, 185, 129, 0.06)', filter: 'blur(40px)' }} />
-          
+
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', position: 'relative', zIndex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(16, 185, 129, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -238,7 +238,7 @@ function AnalysisRenderer({ rapport_ia, analyse_ia, reponse, status, diagnostic_
 
 export default function AiAssistantPage() {
   const queryClient = useQueryClient();
-  const { aiState, setAiState, auditState } = useAppStore();
+  const { aiState, setAiState, auditState, setAuditState } = useAppStore();
   const { sqlToAnalyze, result, loading, pipelineStep, selectedBase } = aiState;
 
   // UI-only state (these reset when navigating away, which is fine)
@@ -291,6 +291,28 @@ export default function AiAssistantPage() {
     }
   };
 
+  const runGranularAiAnalysis = async (id_base, granularResults) => {
+    setAiState({ loading: true, result: null });
+    setAuditState({ result: granularResults }); // Store the data for the report
+    setSaveSuccess(false);
+    // On peut réutiliser l'animation du pipeline ou en faire une plus courte
+    startPipelineAnimation();
+    try {
+      const res = await api.post('/api/ai/analyze_granular', {
+        id_base: parseInt(id_base),
+        results: granularResults
+      });
+      setAiState({ result: res.data });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
+    } catch (err) {
+      console.error(err);
+      alert("Erreur lors de l'analyse IA granulaire.");
+    } finally {
+      stopPipelineAnimation();
+      setAiState({ loading: false });
+    }
+  };
+
   useEffect(() => {
     const fetchBasesAndCheckAudit = async () => {
       let initialBaseId = "";
@@ -306,12 +328,19 @@ export default function AiAssistantPage() {
       }
 
       // Cross-page trigger: AuditPage sets this in localStorage, we pick it up once
-      const stored = localStorage.getItem('og_audit_analyze_request');
-      if (stored) {
+      const storedAudit = localStorage.getItem('og_audit_analyze_request');
+      const storedGranular = localStorage.getItem('og_granular_analyze_request');
+
+      if (storedAudit) {
         localStorage.removeItem('og_audit_analyze_request');
-        const { id_base } = JSON.parse(stored);
+        const { id_base } = JSON.parse(storedAudit);
         setSelectedBase(String(id_base));
         await runSecureAudit(id_base);
+      } else if (storedGranular) {
+        localStorage.removeItem('og_granular_analyze_request');
+        const { id_base, results } = JSON.parse(storedGranular);
+        setSelectedBase(String(id_base));
+        await runGranularAiAnalysis(id_base, results);
       } else {
         // Only set default base if none is already selected in the store
         if (!selectedBase && initialBaseId) setSelectedBase(String(initialBaseId));
@@ -345,13 +374,13 @@ export default function AiAssistantPage() {
     // Extraction propre pour le backend (évite d'envoyer un objet JSON non parsé)
     let aiTextToSave = "";
     if (typeof result === 'string') {
-        aiTextToSave = result;
+      aiTextToSave = result;
     } else if (result.rapport_ia?.texte_final) {
-        aiTextToSave = result.rapport_ia.texte_final;
+      aiTextToSave = result.rapport_ia.texte_final;
     } else if (result.diagnostic_local) {
-        aiTextToSave = `### 🧪 DIAGNOSTIC LOCAL\n${result.diagnostic_local}\n\n### 🚀 SOLUTIONS EXPERTES\n${result.solutions_expertes}`;
+      aiTextToSave = `### 🧪 DIAGNOSTIC LOCAL\n${result.diagnostic_local}\n\n### 🚀 SOLUTIONS EXPERTES\n${result.solutions_expertes}`;
     } else {
-        aiTextToSave = JSON.stringify(result, null, 2);
+      aiTextToSave = JSON.stringify(result, null, 2);
     }
 
     try {
@@ -374,8 +403,8 @@ export default function AiAssistantPage() {
       {/* Header */}
       <div style={{ marginBottom: '30px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-          <div style={{ 
-            width: '50px', height: '50px', borderRadius: '12px', 
+          <div style={{
+            width: '50px', height: '50px', borderRadius: '12px',
             background: 'linear-gradient(135deg, #8b5cf6, #d946ef)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             boxShadow: '0 0 20px rgba(139, 92, 246, 0.4)'
@@ -405,12 +434,12 @@ export default function AiAssistantPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
             <Database size={18} color="#0ea5e9" />
-            <select 
-              value={selectedBase} 
+            <select
+              value={selectedBase}
               onChange={(e) => setSelectedBase(e.target.value)}
-              style={{ 
-                padding: '10px 15px', borderRadius: '10px', 
-                background: '#0f172a', border: '1px solid #334155', 
+              style={{
+                padding: '10px 15px', borderRadius: '10px',
+                background: '#0f172a', border: '1px solid #334155',
                 color: 'white', cursor: 'pointer', outline: 'none', width: '300px'
               }}
             >
@@ -428,13 +457,13 @@ export default function AiAssistantPage() {
 
         {/* Zone de texte */}
         <div style={{ position: 'relative' }}>
-          <textarea 
+          <textarea
             value={sqlToAnalyze}
             onChange={(e) => setSqlToAnalyze(e.target.value)}
             placeholder="Collez ici votre requête SQL Oracle à optimiser..."
-            style={{ 
-              width: '100%', height: '140px', padding: '20px', 
-              borderRadius: '12px', marginBottom: '20px', 
+            style={{
+              width: '100%', height: '140px', padding: '20px',
+              borderRadius: '12px', marginBottom: '20px',
               fontFamily: "'Fira Code', monospace", fontSize: '0.9rem',
               background: 'rgba(15, 23, 42, 0.6)', border: '1px solid #334155',
               color: '#38bdf8', outline: 'none', resize: 'vertical'
@@ -447,13 +476,13 @@ export default function AiAssistantPage() {
 
         {/* Boutons d'action */}
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          <button 
+          <button
             onClick={handleDeepAnalysis}
             disabled={loading || !sqlToAnalyze}
-            style={{ 
-              background: loading ? '#334155' : 'linear-gradient(90deg, #8b5cf6, #6366f1)', 
-              color: 'white', padding: '14px 32px', border: 'none', 
-              borderRadius: '12px', cursor: loading ? 'not-allowed' : 'pointer', 
+            style={{
+              background: loading ? '#334155' : 'linear-gradient(90deg, #8b5cf6, #6366f1)',
+              color: 'white', padding: '14px 32px', border: 'none',
+              borderRadius: '12px', cursor: loading ? 'not-allowed' : 'pointer',
               display: 'flex', alignItems: 'center', gap: '12px',
               fontWeight: 700, transition: 'all 0.3s ease',
               boxShadow: loading ? 'none' : '0 4px 15px rgba(139, 92, 246, 0.3)'
@@ -467,13 +496,13 @@ export default function AiAssistantPage() {
             {loading ? "Analyse en cours..." : "Analyser SQL (Local)"}
           </button>
 
-          <button 
+          <button
             onClick={() => runSecureAudit(selectedBase)}
             disabled={loading || !selectedBase}
-            style={{ 
-              background: loading ? '#334155' : 'linear-gradient(90deg, #10b981, #059669)', 
-              color: 'white', padding: '14px 32px', border: 'none', 
-              borderRadius: '12px', cursor: loading ? 'not-allowed' : 'pointer', 
+            style={{
+              background: loading ? '#334155' : 'linear-gradient(90deg, #10b981, #059669)',
+              color: 'white', padding: '14px 32px', border: 'none',
+              borderRadius: '12px', cursor: loading ? 'not-allowed' : 'pointer',
               display: 'flex', alignItems: 'center', gap: '12px',
               fontWeight: 700, transition: 'all 0.3s ease',
               boxShadow: loading ? 'none' : '0 4px 15px rgba(16, 185, 129, 0.3)'
@@ -487,14 +516,14 @@ export default function AiAssistantPage() {
         {/* Bouton de sauvegarde (affiché après analyse) */}
         {result && !loading && (
           <div style={{ marginTop: '20px', display: 'flex', alignItems: 'center', gap: '15px', animation: 'slideUp 0.3s' }}>
-            <button 
+            <button
               onClick={handleSaveReport}
               disabled={saveLoading}
-              style={{ 
-                background: saveSuccess ? '#059669' : 'rgba(16, 185, 129, 0.1)', 
-                color: saveSuccess ? 'white' : '#10b981', 
-                padding: '12px 24px', border: saveSuccess ? 'none' : '1px solid #10b981', 
-                borderRadius: '10px', cursor: 'pointer', 
+              style={{
+                background: saveSuccess ? '#059669' : 'rgba(16, 185, 129, 0.1)',
+                color: saveSuccess ? 'white' : '#10b981',
+                padding: '12px 24px', border: saveSuccess ? 'none' : '1px solid #10b981',
+                borderRadius: '10px', cursor: 'pointer',
                 display: 'flex', alignItems: 'center', gap: '10px',
                 fontWeight: 700, transition: 'all 0.3s ease'
               }}

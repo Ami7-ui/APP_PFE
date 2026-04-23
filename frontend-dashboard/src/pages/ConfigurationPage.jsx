@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../api';
+import { useNavigate } from 'react-router-dom';
 import GlassCard from '../components/GlassCard';
-import { Settings2, Database, Play, CheckCircle, Terminal, AlertCircle, Loader2, ChevronDown, ChevronUp, CheckSquare, Square, Search, X, ChevronRight, GitBranch } from 'lucide-react';
+import { Settings2, Database, Play, CheckCircle, Terminal, AlertCircle, Loader2, ChevronDown, ChevronUp, CheckSquare, Square, Search, X, ChevronRight, GitBranch, Bot } from 'lucide-react';
 
 export default function ConfigurationPage() {
+  const navigate = useNavigate();
   const [bases, setBases] = useState([]);
   const [selectedBase, setSelectedBase] = useState('');
   const [categories, setCategories] = useState({});
@@ -90,6 +92,15 @@ export default function ConfigurationPage() {
     } finally { 
       setLoading(false); 
     }
+  };
+
+  const launchAiAnalysis = () => {
+    if (!selectedBase || !results) return;
+    localStorage.setItem('og_granular_analyze_request', JSON.stringify({ 
+      id_base: selectedBase,
+      results: results
+    }));
+    navigate('/assistant-ia');
   };
 
   const openPlanModal = (sqlId) => {
@@ -333,6 +344,17 @@ export default function ConfigurationPage() {
 
         {/* COLONNE DROITE : RESULTATS */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {results && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '10px' }}>
+              <button 
+                className="btn btn-primary" 
+                onClick={launchAiAnalysis} 
+                style={{ background: 'linear-gradient(90deg, #8b5cf6, #d946ef)', border: 'none', boxShadow: '0 4px 15px rgba(139, 92, 246, 0.4)', display: 'flex', alignItems: 'center', gap: '8px' }}
+              >
+                <Bot size={18} /> Analyse IA des Résultats
+              </button>
+            </div>
+          )}
           {results ? (
             Object.entries(results).map(([scriptName, dataArray], index) => {
               const isError = dataArray.length > 0 && !!dataArray[0].Erreur;

@@ -862,6 +862,95 @@ def draw_pdf_table(pdf, category_name, flat_data_dict):
         pdf.set_y(max_y)
     
     pdf.ln(5)
+ 
+def draw_pdf_data_table(pdf, script_name, rows):
+    """
+    Dessine un tableau pour les résultats d'un script (liste de dictionnaires).
+    """
+    pdf.set_font('helvetica', 'B', 12)
+    # Background slate dark (#0F172A)
+    pdf.set_fill_color(15, 23, 42) 
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(0, 10, f" RESULTATS SCRIPT : {str(script_name).upper()}", border=1, ln=1, align='L', fill=True)
+    
+    if not rows or not isinstance(rows, list):
+        pdf.set_font('helvetica', 'I', 10)
+        pdf.set_text_color(100, 100, 100)
+        pdf.cell(0, 8, "  Aucune donnée retournée ou format invalide.", border=1, ln=1)
+        pdf.ln(5)
+        return
+
+    # En-tête de tableau (colonnes)
+    headers = list(rows[0].keys())
+    # On limite à 5 colonnes pour la lisibilité
+    headers = headers[:5]
+    
+    pdf.set_font('helvetica', 'B', 9)
+    pdf.set_fill_color(14, 165, 233)
+    pdf.set_text_color(255, 255, 255)
+    
+    col_width = (pdf.w - pdf.l_margin - pdf.r_margin) / len(headers)
+    
+    for h in headers:
+        pdf.cell(col_width, 8, str(h)[:15], border=1, align='C', fill=True)
+    pdf.ln()
+    
+    pdf.set_font('helvetica', '', 8)
+    pdf.set_text_color(30, 41, 59)
+    
+    # On limite à 15 lignes
+    for row in rows[:15]:
+        start_x = pdf.get_x()
+        start_y = pdf.get_y()
+        
+        # Saut de page préventif
+        if start_y > 260:
+            pdf.add_page()
+            start_x = pdf.get_x()
+            start_y = pdf.get_y()
+            # Redessiner l'en-tête
+            pdf.set_font('helvetica', 'B', 9)
+            pdf.set_fill_color(14, 165, 233)
+            pdf.set_text_color(255, 255, 255)
+            for h in headers:
+                pdf.cell(col_width, 8, str(h)[:15], border=1, align='C', fill=True)
+            pdf.ln()
+            start_y = pdf.get_y()
+            pdf.set_font('helvetica', '', 8)
+            pdf.set_text_color(30, 41, 59)
+
+        max_row_h = 6
+        cell_heights = []
+        
+        # Premier passage pour calculer la hauteur max
+        for h in headers:
+            val = str(row.get(h, ""))
+            # Multi_cell simule pour calculer la hauteur
+            # Dans fpdf 1.7.2 c'est complexe, on va juste tronquer ou utiliser une hauteur fixe si possible
+            # Mais on va essayer de faire propre
+            pass
+
+        # Pour simplifier et garantir l'alignement, on utilise une multi_cell et on réaligne
+        # On va fixer la hauteur à 6 ou 12 si texte long
+        row_h = 6
+        for h in headers:
+            val = str(row.get(h, ""))
+            if len(val) > 40: row_h = 12
+        
+        curr_x = start_x
+        for h in headers:
+            val = str(row.get(h, ""))
+            pdf.set_xy(curr_x, start_y)
+            pdf.multi_cell(col_width, row_h/ (2 if row_h==12 else 1), val, border=1, align='L')
+            curr_x += col_width
+            
+        pdf.set_y(start_y + row_h)
+
+    if len(rows) > 15:
+        pdf.set_font('helvetica', 'I', 8)
+        pdf.cell(0, 6, f"... (+ {len(rows) - 15} autres lignes non affichées dans le PDF)", 0, 1, 'C')
+    
+    pdf.ln(5)
 
 def save_audit_report(id_base, audit_data, ai_analysis_string):
     """
@@ -884,7 +973,11 @@ def save_audit_report(id_base, audit_data, ai_analysis_string):
     # Section 2 : Métriques brutes (itération sur le JSON)
     pdf.chapter_title("2. Données Brutes de l'Audit")
     for categorie, data in audit_data.items():
-        if isinstance(data, dict) and not 'error' in data:
+        if isinstance(data, list):
+            # Format granulaire (liste de lignes)
+            draw_pdf_data_table(pdf, categorie, data)
+        elif isinstance(data, dict) and not 'error' in data:
+            # Format classique ou dictionnaire
             flat_data = flatten_dict(data)
             draw_pdf_table(pdf, categorie, flat_data)
 

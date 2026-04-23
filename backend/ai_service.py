@@ -61,7 +61,7 @@ def get_nvidia_senior(diagnostic_text: str) -> str:
     """
     client = OpenAI(
         base_url="https://integrate.api.nvidia.com/v1",
-        api_key="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"
+        api_key="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"
     )
     
     system_prompt = """Tu es un Architecte DBA Oracle Senior. Voici la liste des anomalies détectées par notre outil de monitoring interne. 
@@ -113,6 +113,48 @@ def extract_anomalies(diagnostic_text: str) -> str:
         return "Anomalies détectées : " + diagnostic_text
     except Exception as e:
         return diagnostic_text
+
+def analyze_granular_results(granular_data: dict) -> dict:
+    """
+    Analyse les résultats d'un audit granulaire (sélection de scripts).
+    Le format attendu est {"Nom du Script": [lignes_de_donnees], ...}
+    """
+    context_data = "RÉSULTATS DE L'AUDIT SQL GRANULAIRE :\n"
+    context_data += json.dumps(granular_data, ensure_ascii=False, indent=2)
+    
+    try:
+        # Étape 1 : Junior (Llama 3 Local)
+        system_prompt = """Tu es un Analyste DBA Oracle. Je te fournis les résultats de plusieurs scripts SQL exécutés sur une base de données.
+Ta tâche est d'analyser ces résultats bruts et d'isoler les anomalies ou les points d'attention. Ne donne pas de solutions.
+Structure ta réponse OBLIGATOIREMENT ainsi :
+### 1. 🔍 ANALYSE DES RÉSULTATS PAR SCRIPT
+[Fais un bilan pour chaque script exécuté].
+### 2. ⚠️ ANOMALIES DÉTECTÉES
+[Liste les problèmes potentiels trouvés dans les données]."""
+
+        print(f"[DEBUG] Appel Llama 3 Junior pour Audit Granulaire...")
+        response = ollama.chat(
+            model='llama3',
+            messages=[
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': context_data}
+            ],
+            options={'temperature': 0.1}
+        )
+        diagnostic_local = response['message']['content']
+        
+        # Étape 2 : Senior (Nvidia Cloud)
+        anomalies_only = extract_anomalies(diagnostic_local)
+        solutions_expertes = get_nvidia_senior(anomalies_only)
+        
+        return {
+            "status": "success",
+            "diagnostic_local": diagnostic_local,
+            "solutions_expertes": solutions_expertes,
+            "texte_final": f"{diagnostic_local}\n\n{solutions_expertes}"
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 def analyze_database_health(audit_data: dict, last_audit_data: dict = None) -> dict:
     """

@@ -5,7 +5,6 @@ import './index.css';
 import Sidebar from './components/Sidebar';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
-import AuditPage from './pages/AuditPage';
 import ConfigurationPage from './pages/ConfigurationPage';
 import CiblesPage from './pages/CiblesPage';
 import ScriptsPage from './pages/ScriptsPage';
@@ -82,7 +81,6 @@ export default function App() {
                     <Routes>
                       <Route path="/" element={<DashboardPage user={user} />} />
                       <Route path="/dashboard" element={<Navigate to="/" replace />} />
-                      <Route path="/audit" element={<AuditPage user={user} />} />
                       <Route path="/configuration" element={<ConfigurationPage user={user} />} />
                       <Route path="/cibles" element={<CiblesPage user={user} />} />
                       <Route path="/scripts" element={<ScriptsPage user={user} />} />
