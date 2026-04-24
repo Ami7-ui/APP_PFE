@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api';
 import GlassCard from '../components/GlassCard';
-import { Activity, Database, LayoutList, ChevronRight, ChevronDown, X, AlertCircle, Loader2, GitBranch, Code } from 'lucide-react';
+import { Activity, Database, LayoutList, ChevronRight, ChevronDown, X, AlertCircle, Loader2, GitBranch, Code, Bot } from 'lucide-react';
+import AiResponseViewer from '../components/AiResponseViewer';
 
 export default function SqlPhvPage() {
   const [bases, setBases] = useState([]);
@@ -15,6 +16,9 @@ export default function SqlPhvPage() {
   const [selectedSqlId, setSelectedSqlId] = useState(null);
   const [selectedPhv, setSelectedPhv] = useState(null);
   const [expandedSqlId, setExpandedSqlId] = useState(null);
+
+  const [aiAnalysisResult, setAiAnalysisResult] = useState('');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const [error, setError] = useState('');
 
@@ -83,6 +87,34 @@ export default function SqlPhvPage() {
       .finally(() => {
         setLoadingDetails(false);
       });
+  };
+
+  // 4. Analyser le plan avec l'IA
+  const handleAnalyzePlans = async () => {
+    if (!selectedSqlId || !planDetails) return;
+    
+    // Trouver la requête SQL originale
+    const row = phvList.find(r => (r.SQL_ID || r.sql_id) === selectedSqlId);
+    const query = row ? (row.SCRIPT_SQL || row.script_sql) : "";
+    
+    setIsAnalyzing(true);
+    setAiAnalysisResult('');
+    
+    try {
+      const response = await api.post('/api/ai/analyze-phv', {
+        sql_id: selectedSqlId,
+        query: query || "Requête non disponible",
+        plans: [{
+          phv: selectedPhv,
+          steps: planDetails
+        }]
+      });
+      setAiAnalysisResult(response.data.analysis);
+    } catch (err) {
+      setAiAnalysisResult("Erreur lors de l'analyse IA : " + (err.response?.data?.detail || err.message));
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   return (
@@ -279,11 +311,37 @@ export default function SqlPhvPage() {
                 )}
               </div>
               
-              {planDetails && (
-                <button onClick={() => setPlanDetails(null)} style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', padding: '4px' }}>
-                  <X size={20} />
-                </button>
-              )}
+              <div style={{ display: 'flex', gap: '10px' }}>
+                {planDetails && (
+                  <button 
+                    onClick={handleAnalyzePlans} 
+                    disabled={isAnalyzing}
+                    style={{ 
+                      background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)', 
+                      border: 'none', 
+                      color: 'white', 
+                      padding: '8px 16px', 
+                      borderRadius: '8px', 
+                      cursor: isAnalyzing ? 'wait' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontSize: '0.9rem',
+                      fontWeight: 600,
+                      opacity: isAnalyzing ? 0.7 : 1,
+                      boxShadow: '0 4px 12px rgba(139, 92, 246, 0.3)'
+                    }}
+                  >
+                    {isAnalyzing ? <Loader2 size={16} className="spinner" /> : <Bot size={16} />}
+                    {isAnalyzing ? "Analyse en cours par nvidia_senior..." : "Analyser avec l'IA"}
+                  </button>
+                )}
+                {planDetails && (
+                  <button onClick={() => {setPlanDetails(null); setAiAnalysisResult('');}} style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', padding: '4px' }}>
+                    <X size={20} />
+                  </button>
+                )}
+              </div>
             </div>
 
             <div style={{ flex: 1, padding: planDetails ? 0 : '40px', display: 'flex', flexDirection: 'column', position: 'relative' }}>
@@ -365,6 +423,38 @@ export default function SqlPhvPage() {
                 </div>
               )}
             </div>
+
+            {/* ZONE IA EN DESSOUS DES PLANS */}
+            {(aiAnalysisResult || isAnalyzing) && (
+              <div style={{ 
+                borderTop: '1px solid rgba(139, 92, 246, 0.3)', 
+                background: 'rgba(15, 23, 42, 0.8)', 
+                padding: '24px',
+                flexShrink: 0,
+                maxHeight: '400px',
+                overflowY: 'auto'
+              }}>
+                <h3 style={{ 
+                  color: '#c4b5fd', 
+                  fontSize: '1.1rem', 
+                  marginBottom: '16px', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '8px',
+                  fontWeight: 700
+                }}>
+                  <Bot size={20} /> Analyse Experte (nvidia_senior)
+                </h3>
+                {isAnalyzing ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', color: '#a78bfa' }}>
+                    <Loader2 size={20} className="spinner" />
+                    <span>L'architecte analyse la structure du plan, veuillez patienter...</span>
+                  </div>
+                ) : (
+                  <AiResponseViewer content={aiAnalysisResult} />
+                )}
+              </div>
+            )}
           </GlassCard>
         </div>
 

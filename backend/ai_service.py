@@ -25,7 +25,7 @@ def get_llama3_junior(context_data: str) -> str:
     system_prompt = """Tu es un Analyste DBA Oracle fonctionnant en environnement sécurisé local. Je te fournis les métriques du DERNIER audit et de l'audit ACTUEL.
 Ta tâche est de comparer ces données pour les 6 catégories et d'isoler les problèmes. Ne donne pas de solutions.
 Structure ta réponse OBLIGATOIREMENT ainsi :
-### 1. 📊 ÉVOLUTION DES 6 CATÉGORIES
+### 1. ÉVOLUTION DES 6 CATÉGORIES
 Fais un bilan comparatif (Amélioration, Dégradation ou Stabilité) pour TOUTES ces catégories, une par une :
 - Performance système : [Ton analyse]
 - Stockage : [Ton analyse]
@@ -34,7 +34,7 @@ Fais un bilan comparatif (Amélioration, Dégradation ou Stabilité) pour TOUTES
 - Réplication et HA : [Ton analyse]
 - Métier : [Ton analyse]
 
-### 2. ⚠️ ANOMALIES ET DÉGRADATIONS
+### 2. ANOMALIES ET DÉGRADATIONS
 [Fais une liste à puces claire des problèmes critiques ou des régressions détectées entre les deux audits]."""
     
     try:
@@ -54,7 +54,7 @@ Fais un bilan comparatif (Amélioration, Dégradation ou Stabilité) pour TOUTES
         print(f"[ERROR] Échec Llama 3 Junior : {e}")
         raise Exception(f"Erreur Llama 3 (Junior) : {str(e)}")
 
-def get_nvidia_senior(diagnostic_text: str) -> str:
+def get_nvidia_senior(diagnostic_text: str, custom_system_prompt: str = None) -> str:
     """
     ÉTAPE 2 : L'Architecte (Nvidia Nemotron Cloud)
     Prend le diagnostic et propose des solutions et de la prévention.
@@ -64,12 +64,12 @@ def get_nvidia_senior(diagnostic_text: str) -> str:
         api_key="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"
     )
     
-    system_prompt = """Tu es un Architecte DBA Oracle Senior. Voici la liste des anomalies détectées par notre outil de monitoring interne. 
+    system_prompt = custom_system_prompt or """Tu es un Architecte DBA Oracle Senior. Voici la liste des anomalies détectées par notre outil de monitoring interne. 
 Propose des solutions techniques.
 Structure ta réponse OBLIGATOIREMENT ainsi :
-### 3. 🛠️ SOLUTIONS RECOMMANDÉES
+### 3. SOLUTIONS RECOMMANDÉES
 [Propose des solutions. RÈGLE ABSOLUE : Si une action en base est requise, fournis le code SQL/PLSQL encadré par des triples backticks ```sql].
-### 4. 🛡️ PRÉVENTION ET BONNES PRATIQUES
+### 4. PRÉVENTION ET BONNES PRATIQUES
 [Donne des conseils pour éviter que ces anomalies ne se reproduisent]."""
     
     try:
@@ -127,7 +127,7 @@ def analyze_granular_results(granular_data: dict) -> dict:
         system_prompt = """Tu es un Analyste DBA Oracle. Je te fournis les résultats de plusieurs scripts SQL exécutés sur une base de données.
 Ta tâche est d'analyser ces résultats bruts et d'isoler les anomalies ou les points d'attention. Ne donne pas de solutions.
 Structure ta réponse OBLIGATOIREMENT ainsi :
-### 1. 🔍 ANALYSE DES RÉSULTATS PAR SCRIPT
+### 1. ANALYSE DES RÉSULTATS PAR SCRIPT
 [Fais un bilan pour chaque script exécuté].
 ### 2. ⚠️ ANOMALIES DÉTECTÉES
 [Liste les problèmes potentiels trouvés dans les données]."""
@@ -257,3 +257,53 @@ Structure :
         return json.loads(response['message']['content'])
     except Exception as e:
         return {"reponse": f"Erreur : {str(e)}", "details_techniques": "", "actions_suggerees": []}
+
+def analyze_phv_plans(query: str, plans: list) -> str:
+    """
+    Analyse les plans d'exécution (PHV) fournis.
+    Si un seul plan est fourni, explique sa stratégie.
+    Si plusieurs plans sont fournis, les compare.
+    """
+    system_prompt = """Tu es un expert DBA Oracle Senior spécialisé dans le diagnostic. Ton rôle est d'analyser les plans d'exécution (PHV) fournis. 
+REGLE ABSOLUE : Tu NE DOIS JAMAIS proposer de solutions directes (pas de réécriture de code SQL, pas de commandes DDL comme CREATE INDEX). 
+Pour CHAQUE plan fourni, tu dois structurer ta réponse exactement de cette manière (en utilisant le Markdown) :
+
+### 🔍 Analyse du Plan (PHV : [Numéro])
+**Mécanique d'exécution :** Explique pas à pas comment Oracle lit les données (quel index est utilisé, pourquoi un Full Scan est déclenché, l'ordre des jointures).
+**Goulots d'étranglement :** Identifie les opérations les plus coûteuses (Cost) ou les anomalies de cardinalité (Rows).
+
+> **🛡️ Prévention et Concepts :**
+> Explique de manière conceptuelle comment éviter ce type de plan sous-optimal à l'avenir (ex: 'Privilégier des contraintes d'unicité', 'Maintenir les statistiques à jour sur telle colonne', 'Attention à la sélectivité des clauses LIKE'). Ne donne pas de code SQL."""
+
+    # Préparation du contexte
+    user_content = f"REQUÊTE SQL :\n```sql\n{query}\n```\n\n"
+    
+    for i, plan in enumerate(plans):
+        phv = plan.get('phv', f'Plan {i+1}')
+        steps = plan.get('steps', [])
+        user_content += f"PLAN D'EXÉCUTION (PHV: {phv}) :\n"
+        # On simplifie les colonnes pour le prompt
+        for s in steps:
+            op = s.get('OPERATION') or s.get('operation')
+            opt = s.get('OPTIONS') or s.get('options')
+            obj = s.get('OBJECT_NAME') or s.get('object_name')
+            cost = s.get('COST') or s.get('cost')
+            card = s.get('CARDINALITY') or s.get('cardinality')
+            depth = s.get('depth', 0)
+            user_content += f"{'  ' * depth}- {op} ({opt}) | Object: {obj} | Cost: {cost} | Card: {card}\n"
+        user_content += "\n"
+
+    try:
+        # On utilise nvidia_senior avec le prompt spécifique défini ci-dessus
+        return get_nvidia_senior(user_content, custom_system_prompt=system_prompt)
+    except Exception as e:
+        # Fallback llama3 local si nvidia échoue
+        response = ollama.chat(
+            model='llama3',
+            messages=[
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': user_content}
+            ],
+            options={'temperature': 0.2}
+        )
+        return response['message']['content']

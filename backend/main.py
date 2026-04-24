@@ -89,6 +89,11 @@ class GranularAIRequest(BaseModel):
     id_base: int
     results: dict
 
+class PHVAnalysisRequest(BaseModel):
+    sql_id: str
+    query: str
+    plans: List[dict] # Liste des plans d'exécution (chaque plan est une liste d'étapes)
+
 # ── ROUTES AUTHENTIFICATION ───────────────────────────────────────────────────
 
 @app.post("/api/login")
@@ -333,6 +338,14 @@ async def analyze_granular(req: GranularAIRequest):
         return {"rapport_ia": analysis_result}
     except Exception as e:
         return {"error": str(e)}
+
+@app.post("/api/ai/analyze-phv")
+async def analyze_phv(req: PHVAnalysisRequest):
+    try:
+        analysis = ai_service.analyze_phv_plans(req.query, req.plans)
+        return {"analysis": analysis}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/ai/analyze_audit")
 async def analyze_audit(req: AuditAnalysisRequest):

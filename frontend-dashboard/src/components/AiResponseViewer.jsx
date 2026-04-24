@@ -57,10 +57,19 @@ const AiResponseViewer = ({ content }) => {
             );
           },
           h1: ({ children }) => <h1 style={{ color: '#fff', fontSize: '1.4rem', fontWeight: 800, margin: '28px 0 16px 0', display: 'flex', alignItems: 'center', gap: '10px' }}><Hash size={20} color="#8b5cf6" /> {children}</h1>,
-          h2: ({ children }) => <h2 style={{ color: '#fff', fontSize: '1.2rem', fontWeight: 700, margin: '24px 0 14px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>{children}</h2>,
-          h3: ({ children }) => <h3 style={{ color: '#fff', fontSize: '1.05rem', fontWeight: 700, margin: '20px 0 12px 0', display: 'flex', alignItems: 'center', gap: '8px' }}><Info size={16} color="#38bdf8" /> {children}</h3>,
+          h2: ({ children }) => <h2 style={{ color: '#fff', fontSize: '1.2rem', fontWeight: 700, margin: '32px 0 14px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>{children}</h2>,
+          h3: ({ children }) => <h3 style={{ color: '#fff', fontSize: '1.1rem', fontWeight: 700, margin: '40px 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px', borderLeft: '3px solid #38bdf8', paddingLeft: '12px' }}>{children}</h3>,
           blockquote: ({ children }) => (
-            <blockquote style={{ borderLeft: '4px solid #8b5cf6', background: 'rgba(139, 92, 246, 0.05)', padding: '16px 20px', borderRadius: '0 12px 12px 0', margin: '20px 0', fontStyle: 'italic' }}>
+            <blockquote style={{ 
+              borderLeft: '4px solid #f59e0b', 
+              background: 'rgba(245, 158, 11, 0.08)', 
+              padding: '16px 20px', 
+              borderRadius: '0 12px 12px 0', 
+              margin: '24px 0', 
+              fontStyle: 'normal',
+              border: '1px solid rgba(245, 158, 11, 0.1)',
+              borderLeftWidth: '4px'
+            }}>
               {children}
             </blockquote>
           ),

@@ -866,6 +866,8 @@ def draw_pdf_table(pdf, category_name, flat_data_dict):
 def draw_pdf_data_table(pdf, script_name, rows):
     """
     Dessine un tableau pour les résultats d'un script (liste de dictionnaires).
+    Avec gestion dynamique des largeurs et hauteurs pour éviter le chevauchement.
+    Priorise la colonne SQL_TEXT pour lui donner un maximum d'espace (60%).
     """
     pdf.set_font('helvetica', 'B', 12)
     # Background slate dark (#0F172A)
@@ -885,65 +887,125 @@ def draw_pdf_data_table(pdf, script_name, rows):
     # On limite à 5 colonnes pour la lisibilité
     headers = headers[:5]
     
+    total_width = pdf.w - pdf.l_margin - pdf.r_margin
+    col_widths = []
+    
+    # 1. Redistribution dynamique des largeurs
+    long_col_idx = -1
+    # On cherche d'abord spécifiquement une colonne contenant "SQL_TEXT"
+    for i, h in enumerate(headers):
+        h_upper = str(h).upper()
+        if "SQL_TEXT" in h_upper or "SQL_FULLTEXT" in h_upper:
+            long_col_idx = i
+            break
+            
+    # Fallback sur une colonne SQL générique ou TEXT si le terme précis n'est pas trouvé
+    if long_col_idx == -1:
+        for i, h in enumerate(headers):
+            h_upper = str(h).upper()
+            if "SQL" in h_upper or "TEXT" in h_upper:
+                long_col_idx = i
+                break
+            
+    if long_col_idx != -1 and len(headers) > 1:
+        for i, h in enumerate(headers):
+            if i == long_col_idx:
+                col_widths.append(total_width * 0.6) # 60% pour le SQL
+            else:
+                col_widths.append((total_width * 0.4) / (len(headers) - 1)) # 40% pour le reste
+    else:
+        for i in range(len(headers)):
+            col_widths.append(total_width / len(headers))
+            
     pdf.set_font('helvetica', 'B', 9)
     pdf.set_fill_color(14, 165, 233)
     pdf.set_text_color(255, 255, 255)
     
-    col_width = (pdf.w - pdf.l_margin - pdf.r_margin) / len(headers)
+    # Dessiner l'en-tête
+    start_x = pdf.get_x()
+    start_y = pdf.get_y()
+    curr_x = start_x
+    row_h_header = 8
     
-    for h in headers:
-        pdf.cell(col_width, 8, str(h)[:15], border=1, align='C', fill=True)
-    pdf.ln()
+    for i, h in enumerate(headers):
+        pdf.set_xy(curr_x, start_y)
+        pdf.rect(curr_x, start_y, col_widths[i], row_h_header, style='FD')
+        pdf.multi_cell(col_widths[i], row_h_header, str(h)[:15], border=0, align='C')
+        curr_x += col_widths[i]
+    pdf.set_y(start_y + row_h_header)
     
     pdf.set_font('helvetica', '', 8)
     pdf.set_text_color(30, 41, 59)
     
+    def get_nb_lines(w, txt):
+        cw = w - 2 # Marge interne approximative
+        if cw <= 0: cw = 1
+        if not txt: return 1
+        lines = 0
+        for line in str(txt).split('\n'):
+            lw = pdf.get_string_width(line)
+            nl = int(lw / cw)
+            if lw > 0 and (lw % cw) > 0:
+                nl += 1
+            lines += max(1, nl)
+        return lines
+
     # On limite à 15 lignes
     for row in rows[:15]:
         start_x = pdf.get_x()
         start_y = pdf.get_y()
         
-        # Saut de page préventif
-        if start_y > 260:
+        # 2. Calcul de la hauteur dynamique de la ligne entière
+        max_lines = 1
+        for i, h in enumerate(headers):
+            val = str(row.get(h, ""))
+            nl = get_nb_lines(col_widths[i], val)
+            if nl > max_lines:
+                max_lines = nl
+                
+        line_height = 5
+        row_h = max_lines * line_height
+        
+        # 3. Saut de page intelligent
+        if start_y + row_h > 270:
             pdf.add_page()
             start_x = pdf.get_x()
             start_y = pdf.get_y()
-            # Redessiner l'en-tête
+            
+            # Redessiner l'en-tête sur la nouvelle page
             pdf.set_font('helvetica', 'B', 9)
             pdf.set_fill_color(14, 165, 233)
             pdf.set_text_color(255, 255, 255)
-            for h in headers:
-                pdf.cell(col_width, 8, str(h)[:15], border=1, align='C', fill=True)
-            pdf.ln()
-            start_y = pdf.get_y()
+            curr_x = start_x
+            for i, h in enumerate(headers):
+                pdf.set_xy(curr_x, start_y)
+                pdf.rect(curr_x, start_y, col_widths[i], row_h_header, style='FD')
+                pdf.multi_cell(col_widths[i], row_h_header, str(h)[:15], border=0, align='C')
+                curr_x += col_widths[i]
+            pdf.set_y(start_y + row_h_header)
+            
+            # Repasser à la police de données
             pdf.set_font('helvetica', '', 8)
             pdf.set_text_color(30, 41, 59)
+            start_y = pdf.get_y()
 
-        max_row_h = 6
-        cell_heights = []
-        
-        # Premier passage pour calculer la hauteur max
-        for h in headers:
-            val = str(row.get(h, ""))
-            # Multi_cell simule pour calculer la hauteur
-            # Dans fpdf 1.7.2 c'est complexe, on va juste tronquer ou utiliser une hauteur fixe si possible
-            # Mais on va essayer de faire propre
-            pass
-
-        # Pour simplifier et garantir l'alignement, on utilise une multi_cell et on réaligne
-        # On va fixer la hauteur à 6 ou 12 si texte long
-        row_h = 6
-        for h in headers:
-            val = str(row.get(h, ""))
-            if len(val) > 40: row_h = 12
-        
+        # 4. Dessin du tableau (Sauvegarde des coordonnées X/Y pour alignement)
         curr_x = start_x
-        for h in headers:
+        for i, h in enumerate(headers):
             val = str(row.get(h, ""))
-            pdf.set_xy(curr_x, start_y)
-            pdf.multi_cell(col_width, row_h/ (2 if row_h==12 else 1), val, border=1, align='L')
-            curr_x += col_width
             
+            # Dessiner le rectangle extérieur de la cellule (grille propre)
+            pdf.rect(curr_x, start_y, col_widths[i], row_h)
+            
+            # Positionner pour écrire le texte au sommet de la cellule
+            pdf.set_xy(curr_x, start_y)
+            
+            # Écrire le texte (multi_cell gère les retours à la ligne sans chevaucher)
+            pdf.multi_cell(col_widths[i], line_height, val, border=0, align='L')
+            
+            curr_x += col_widths[i]
+            
+        # Fin de la ligne : on place impérativement le curseur Y à la fin de la cellule la plus haute
         pdf.set_y(start_y + row_h)
 
     if len(rows) > 15:
@@ -952,14 +1014,35 @@ def draw_pdf_data_table(pdf, script_name, rows):
     
     pdf.ln(5)
 
+def sanitize_for_fpdf(val):
+    if isinstance(val, str):
+        replacements = {
+            'Œ': 'OE', 'œ': 'oe', '€': 'EUR', '’': "'",
+            '‘': "'", '“': '"', '”': '"', '–': '-', '—': '-',
+            '…': '...'
+        }
+        for old, new in replacements.items():
+            val = val.replace(old, new)
+        return val.encode('latin-1', 'replace').decode('latin-1')
+    elif isinstance(val, list):
+        return [sanitize_for_fpdf(item) for item in val]
+    elif isinstance(val, dict):
+        return {sanitize_for_fpdf(k): sanitize_for_fpdf(v) for k, v in val.items()}
+    return val
+
 def save_audit_report(id_base, audit_data, ai_analysis_string):
     """
     Génère un PDF en mémoire (BytesIO) et l'insère dans la colonne BLOB 'fichier_pdf'.
     Utilise les données brutes (audit_data) et l'analyse IA (string).
     """    
+    # 1. Nettoyage des données pour éviter les erreurs d'encodage latin-1 dans FPDF
+    ai_analysis_pdf = sanitize_for_fpdf(ai_analysis_string)
+    audit_data_pdf = sanitize_for_fpdf(audit_data)
+    
     # Récupérer le nom humain de la base
     creds = get_target_credentials(id_base)
     nom_base = creds[4] if creds else f"Base_{id_base}"
+    nom_base_pdf = sanitize_for_fpdf(nom_base)
     
     # Préparer la structure du PDF
     pdf = AuditPDF()
@@ -968,11 +1051,11 @@ def save_audit_report(id_base, audit_data, ai_analysis_string):
     
     # Section 1 : Informations
     pdf.chapter_title("1. Général - Informations de l'Instance")
-    pdf.chapter_body(f"Base de données cible : {nom_base}\nDate de génération : {datetime.datetime.now().strftime('%d/%m/%Y à %H:%M')}")
+    pdf.chapter_body(f"Base de données cible : {nom_base_pdf}\nDate de génération : {datetime.datetime.now().strftime('%d/%m/%Y à %H:%M')}")
     
     # Section 2 : Métriques brutes (itération sur le JSON)
     pdf.chapter_title("2. Données Brutes de l'Audit")
-    for categorie, data in audit_data.items():
+    for categorie, data in audit_data_pdf.items():
         if isinstance(data, list):
             # Format granulaire (liste de lignes)
             draw_pdf_data_table(pdf, categorie, data)
@@ -986,11 +1069,15 @@ def save_audit_report(id_base, audit_data, ai_analysis_string):
     
     # Section 3 : Expertise IA
     pdf.chapter_title("3. Expertise IA Complète (LLaMA + Nvidia)")
-    pdf.chapter_body(ai_analysis_string)
+    pdf.chapter_body(ai_analysis_pdf)
 
     # Génération binaire spécifique pour fpdf 1.7.2
-    pdf_string = pdf.output(dest='S')
-    pdf_bytes = pdf_string.encode('latin-1')
+    try:
+        pdf_string = pdf.output(dest='S')
+        pdf_bytes = pdf_string.encode('latin-1', 'replace') if isinstance(pdf_string, str) else pdf_string
+    except Exception as e:
+        # Fallback in case fpdf2 returns bytes directly
+        pdf_bytes = pdf.output()
 
     # 4. Insertion Oracle BLOB et JSON
     conn = get_oracle_connection()
