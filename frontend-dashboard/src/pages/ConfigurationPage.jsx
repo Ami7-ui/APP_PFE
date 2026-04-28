@@ -8,7 +8,7 @@ export default function ConfigurationPage() {
   const navigate = useNavigate();
   const [bases, setBases] = useState([]);
   const [selectedBase, setSelectedBase] = useState(() => localStorage.getItem('og_dashboard_base') || '');
-  const [categories, setCategories] = useState({});
+  const [scripts, setScripts] = useState([]);
   const [selectedScripts, setSelectedScripts] = useState(() => {
     const saved = localStorage.getItem('og_dashboard_metrics');
     if (saved) {
@@ -42,9 +42,9 @@ export default function ConfigurationPage() {
       if (r.data.length > 0 && !localStorage.getItem('og_dashboard_base')) setSelectedBase(String(r.data[0].ID)); 
     }).catch(() => setError("Erreur de chargement des bases cibles."));
 
-    // Charger les scripts catégorisés
-    api.get('/api/diagnostics/scripts').then(r => {
-      setCategories(r.data);
+    // Charger tous les scripts
+    api.get('/api/scripts').then(r => {
+      setScripts(r.data);
     }).catch(err => {
       console.error(err);
       setError("Erreur de chargement des métriques.");
@@ -73,9 +73,9 @@ export default function ConfigurationPage() {
 
   const toggleScript = (script) => {
     setSelectedScripts(prev => {
-      const exists = prev.find(s => s.id === script.id);
-      if (exists) return prev.filter(s => s.id !== script.id);
-      return [...prev, script];
+      const exists = prev.find(s => s.id === script.ID || s.id === script.id);
+      if (exists) return prev.filter(s => (s.id !== script.ID && s.id !== script.id));
+      return [...prev, { id: script.ID, nom: script.Nom_Scripte, code: script.Contenu_Script }];
     });
   };
 
@@ -166,7 +166,14 @@ export default function ConfigurationPage() {
       .finally(() => setLoadingPlan(false));
   };
 
-  const totalScripts = Object.values(categories).reduce((acc, cat) => acc + cat.length, 0);
+  const categorizedScripts = {
+    "Performance": scripts.filter(s => s.id_type_metrique === 2),
+    "Stockage": scripts.filter(s => s.id_type_metrique === 3),
+    "Requêtes": scripts.filter(s => s.id_type_metrique === 21),
+    "Connexion": scripts.filter(s => s.id_type_metrique === 22)
+  };
+
+  const totalScripts = scripts.length;
 
   return (
     <div style={{ paddingBottom: '60px' }}>
@@ -254,11 +261,11 @@ export default function ConfigurationPage() {
               </div>
             </div>
 
-            {/* LISTES DÉROULANTES MULTIPLES */}
+            {/* LISTES DÉROULANTES MULTIPLES PAR CATÉGORIE */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {Object.entries(categories).map(([catName, scripts]) => {
+              {Object.entries(categorizedScripts).map(([catName, scriptsInCat]) => {
                 const isOpen = openDropdown === catName;
-                const selectedInCat = scripts.filter(s => selectedScripts.some(ss => ss.id === s.id)).length;
+                const selectedInCat = scriptsInCat.filter(s => selectedScripts.some(ss => ss.id === s.ID)).length;
                 
                 return (
                   <div key={catName} style={{ position: 'relative' }}>
@@ -308,11 +315,13 @@ export default function ConfigurationPage() {
                         gap: '4px',
                         animation: 'fadeIn 0.2s'
                       }}>
-                        {scripts.map(script => {
-                          const isSelected = selectedScripts.some(s => s.id === script.id);
+                        {scriptsInCat.length === 0 ? (
+                          <div style={{ padding: '10px', fontSize: '0.8rem', color: '#64748b', textAlign: 'center' }}>Aucun script</div>
+                        ) : scriptsInCat.map(script => {
+                          const isSelected = selectedScripts.some(s => s.id === script.ID);
                           return (
                             <div 
-                              key={script.id} 
+                              key={script.ID} 
                               onClick={() => toggleScript(script)}
                               style={{
                                 padding: '10px 12px',
@@ -329,23 +338,17 @@ export default function ConfigurationPage() {
                             >
                               {isSelected ? <CheckSquare size={18} color="#0ea5e9" /> : <Square size={18} color="#64748b" />}
                               <div style={{ flex: 1 }}>
-                                <div style={{ fontSize: '0.85rem', color: isSelected ? '#38bdf8' : '#e2e8f0', fontWeight: isSelected ? 600 : 400 }}>{script.nom}</div>
+                                <div style={{ fontSize: '0.85rem', color: isSelected ? '#38bdf8' : '#e2e8f0', fontWeight: isSelected ? 600 : 400 }}>{script.Nom_Scripte}</div>
+                                <div style={{ fontSize: '0.7rem', color: '#64748b' }}>{script.Type_Scripte}</div>
                               </div>
                             </div>
                           );
                         })}
-                        {scripts.length === 0 && <div style={{ padding: '10px', fontSize: '0.8rem', color: '#64748b', textAlign: 'center' }}>Aucun script</div>}
                       </div>
                     )}
                   </div>
                 );
               })}
-              
-              {Object.keys(categories).length === 0 && (
-                <div style={{ textAlign: 'center', padding: '20px', background: 'rgba(0,0,0,0.2)', borderRadius: '12px', color: '#64748b', fontSize: '0.85rem' }}>
-                  Aucune catégorie chargée. Ajoutez des scripts via la page dédiée.
-                </div>
-              )}
             </div>
 
             <div style={{ marginTop: '30px' }}>

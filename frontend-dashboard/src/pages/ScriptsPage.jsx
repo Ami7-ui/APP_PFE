@@ -8,7 +8,7 @@ export default function ScriptsPage() {
   const [scripts, setScripts] = useState([]);
   const [typesBase, setTypesBase] = useState([]);
   const [filter, setFilter]       = useState('all');
-  const [form, setForm]       = useState({ Nom_Scripte: '', id_type_base: '', Contenu_Script: '' });
+  const [form, setForm]       = useState({ Nom_Scripte: '', id_type_base: '', Contenu_Script: '', id_type_metrique: 2 });
   const [editId, setEditId]   = useState(null);
   const [error, setError]     = useState('');
   const [success, setSuccess] = useState('');
@@ -44,7 +44,8 @@ export default function ScriptsPage() {
     const payload = {
       Nom_Scripte: form.Nom_Scripte,
       Contenu_Script: form.Contenu_Script,
-      id_type_base: parseInt(form.id_type_base)
+      id_type_base: parseInt(form.id_type_base),
+      id_type_metrique: parseInt(form.id_type_metrique)
     };
     try {
       if(editId) {
@@ -54,7 +55,7 @@ export default function ScriptsPage() {
         await api.post('/api/scripts', payload);
         setSuccess('Nouveau script créé avec succès !');
       }
-      setForm({ Nom_Scripte: '', id_type_base: '', Contenu_Script: '' });
+      setForm({ Nom_Scripte: '', id_type_base: '', Contenu_Script: '', id_type_metrique: 2 });
       setEditId(null);
       load();
     } catch (err) { 
@@ -187,6 +188,15 @@ export default function ScriptsPage() {
                   {typesBase.map(t => <option key={t.id} value={t.id}>{t.nom}</option>)}
                 </select>
               </div>
+              <div className="form-group">
+                <label className="form-label">Catégorie</label>
+                <select value={form.id_type_metrique} onChange={e=>setForm({...form,id_type_metrique:e.target.value})} required>
+                  <option value="2">Performance</option>
+                  <option value="3">Stockage</option>
+                  <option value="21">Requête</option>
+                  <option value="22">Connexion</option>
+                </select>
+              </div>
             </div>
 
             <div className="form-group">
@@ -203,7 +213,7 @@ export default function ScriptsPage() {
               <button type="submit" className="btn btn-primary" style={{ flex: 1, background: 'linear-gradient(135deg, #ec4899, #be185d)' }}>
                 {editId ? <><Save size={16}/> Mettre à jour</> : <><Plus size={16}/> Créer le script</>}
               </button>
-              {editId && <button type="button" className="btn btn-ghost" onClick={() => { setEditId(null); setForm({ Nom_Scripte: '', id_type_base: '', Contenu_Script: '' }); }}><X size={16}/></button>}
+              {editId && <button type="button" className="btn btn-ghost" onClick={() => { setEditId(null); setForm({ Nom_Scripte: '', id_type_base: '', Contenu_Script: '', id_type_metrique: 2 }); }}><X size={16}/></button>}
             </div>
           </form>
         </GlassCard>
