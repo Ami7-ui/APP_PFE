@@ -1,20 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import api from '../api';
 import GlassCard from '../components/GlassCard';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, Area, AreaChart,
-  PieChart, Pie, Cell
+  PieChart, Pie, Cell, BarChart, Bar
 } from 'recharts';
-import { Activity, Server, Users, RefreshCw, PlugZap, Clock, Target, Database, Shield, Calendar, Loader2 } from 'lucide-react';
+import { Activity, Server, Users, RefreshCw, PlugZap, Clock, Target, Database, Shield, Loader2, AlertCircle, Settings } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
-const KPI_OPTIONS = [
-  { key: 'CPU',      label: 'Charge CPU',       unit: '%', color: '#0ea5e9', Icon: Activity },
-  { key: 'RAM',      label: 'Mémoire RAM',      unit: '%', color: '#8b5cf6', Icon: Server },
-  { key: 'Sessions', label: 'Sessions Actives', unit: '',  color: '#10b981', Icon: Users },
-  { key: 'Transactions', label: 'Transactions', unit: '',  color: '#f59e0b', Icon: RefreshCw },
-  { key: 'Blocked', label: 'Blocages', unit: '',  color: '#ef4444', Icon: Shield },
-];
+const CHART_COLORS = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6'];
 
 function StatusBanner({ status }) {
   if (!status) return null;
@@ -68,22 +63,10 @@ function GaugeChart({ value, label, unit, color, maxValue = 100, displayValue })
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie
-            data={data}
-            cx="50%"
-            cy="85%"
-            startAngle={180}
-            endAngle={0}
-            innerRadius={65}
-            outerRadius={85}
-            paddingAngle={0}
-            dataKey="value"
-            stroke="none"
-            animationDuration={1500}
-            animationBegin={0}
+            data={data} cx="50%" cy="85%" startAngle={180} endAngle={0}
+            innerRadius={65} outerRadius={85} paddingAngle={0} dataKey="value" stroke="none"
           >
-            {data.map((entry, index) => (
-              <Cell key={`cell-${index}`} fill={entry.fill} />
-            ))}
+            {data.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.fill} />)}
           </Pie>
         </PieChart>
       </ResponsiveContainer>
@@ -99,266 +82,271 @@ function GaugeChart({ value, label, unit, color, maxValue = 100, displayValue })
   );
 }
 
-const STORAGE_KEY = 'og_dashboard_history';
+function DynamicMetricCard({ scriptName, dataArray }) {
+  if (!dataArray || dataArray.length === 0 || dataArray[0].Erreur) {
+    return (
+      <GlassCard>
+        <h3 style={{ fontSize: '0.9rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>{scriptName}</h3>
+        <div style={{ padding: 20, textAlign: 'center', color: '#ef4444', fontSize: '0.85rem', background: 'rgba(239, 68, 68, 0.1)', borderRadius: 8 }}>
+          {dataArray?.[0]?.Erreur || "Aucune donnée"}
+        </div>
+      </GlassCard>
+    );
+  }
+
+  const nameLower = scriptName.toLowerCase();
+  
+  // 1. Charge globale (DB Time / CPU) -> Area/Line Chart
+  if (nameLower.includes('charge globale') || nameLower.includes('db time') || nameLower.includes('cpu')) {
+    return (
+      <GlassCard style={{ gridColumn: '1 / -1' }}>
+        <h3 style={{ fontSize: '0.9rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 20 }}>{scriptName}</h3>
+        <div style={{ height: 300 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={dataArray}>
+              <defs>
+                <linearGradient id={`colorDbTime-${scriptName}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.8}/>
+                  <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <XAxis dataKey={Object.keys(dataArray[0])[0]} stroke="#94a3b8" fontSize={12} />
+              <YAxis stroke="#94a3b8" fontSize={12} />
+              <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }} />
+              <Legend />
+              {Object.keys(dataArray[0]).slice(1).map((key, i) => (
+                <Area key={key} type="monotone" dataKey={key} stroke={CHART_COLORS[i % CHART_COLORS.length]} fillOpacity={1} fill={`url(#colorDbTime-${scriptName})`} />
+              ))}
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </GlassCard>
+    );
+  }
+
+  // 2. IOPS Temps Réel -> Line Chart
+  if (nameLower.includes('iops') || nameLower.includes('io') || nameLower.includes('temps réel')) {
+    return (
+      <GlassCard style={{ gridColumn: '1 / -1' }}>
+        <h3 style={{ fontSize: '0.9rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 20 }}>{scriptName}</h3>
+        <div style={{ height: 300 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={dataArray}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <XAxis dataKey={Object.keys(dataArray[0])[0]} stroke="#94a3b8" fontSize={12} />
+              <YAxis stroke="#94a3b8" fontSize={12} />
+              <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }} />
+              <Legend />
+              {Object.keys(dataArray[0]).slice(1).map((key, i) => (
+                <Line key={key} type="monotone" dataKey={key} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2} dot={false} />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </GlassCard>
+    );
+  }
+
+  // 3. Temps CPU Actif/Inactif -> Doughnut Chart
+  if (nameLower.includes('cpu actif') || nameLower.includes('inactif') || nameLower.includes('ratio')) {
+    const data = dataArray.map(r => ({ name: Object.values(r)[0], value: Number(Object.values(r)[1]) }));
+    return (
+      <GlassCard>
+        <h3 style={{ fontSize: '0.9rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 20 }}>{scriptName}</h3>
+        <div style={{ height: 250 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie data={data} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
+                {data.map((entry, index) => <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />)}
+              </Pie>
+              <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }} />
+              <Legend />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      </GlassCard>
+    );
+  }
+
+  // 4. Composants SGA & PGA -> Pie Chart
+  if (nameLower.includes('sga') || nameLower.includes('pga') || nameLower.includes('mémoire') || nameLower.includes('memory')) {
+    const data = dataArray.map(r => ({ name: Object.values(r)[0], value: Number(Object.values(r)[1]) }));
+    return (
+      <GlassCard>
+        <h3 style={{ fontSize: '0.9rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 20 }}>{scriptName}</h3>
+        <div style={{ height: 250 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie data={data} cx="50%" cy="50%" outerRadius={80} dataKey="value" label={false}>
+                {data.map((entry, index) => <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />)}
+              </Pie>
+              <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }} />
+              <Legend />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      </GlassCard>
+    );
+  }
+
+  // 5. Nombre Utilisateurs Actifs -> Gauge Chart ou Big Number
+  if (nameLower.includes('utilisateurs') || nameLower.includes('sessions')) {
+    const value = dataArray[0] ? Number(Object.values(dataArray[0])[0]) : 0;
+    return (
+      <GlassCard>
+        <h3 style={{ fontSize: '0.9rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 20 }}>{scriptName}</h3>
+        <GaugeChart value={value} label="Valeur Actuelle" unit="" color="#10b981" maxValue={500} displayValue={value} />
+      </GlassCard>
+    );
+  }
+
+  // 7. FIXED SCRIPT (Top SQL) -> Horizontal Bar Chart
+  if (nameLower.includes('top sql') || nameLower.includes('fixed script') || nameLower.includes('sql')) {
+    return (
+      <GlassCard style={{ gridColumn: '1 / -1' }}>
+        <h3 style={{ fontSize: '0.9rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 20 }}>{scriptName}</h3>
+        <div style={{ height: 350 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={dataArray} layout="vertical" margin={{ left: 50 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" horizontal={false} />
+              <XAxis type="number" stroke="#94a3b8" fontSize={12} />
+              <YAxis dataKey={Object.keys(dataArray[0])[0]} type="category" stroke="#94a3b8" fontSize={12} width={100} />
+              <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }} />
+              <Bar dataKey={Object.keys(dataArray[0])[1]} fill="#8b5cf6" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </GlassCard>
+    );
+  }
+
+  // 6. État des nœuds ou default fallback -> Table
+  return (
+    <GlassCard style={{ gridColumn: '1 / -1', overflowX: 'auto' }}>
+      <h3 style={{ fontSize: '0.9rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 20 }}>{scriptName}</h3>
+      <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: '0 8px' }}>
+        <thead>
+          <tr>
+            {Object.keys(dataArray[0]).map(key => (
+              <th key={key} style={{ padding: '12px 16px', textAlign: 'left', color: '#94a3b8', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase' }}>
+                {key}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {dataArray.map((row, i) => (
+            <tr key={i} style={{ background: 'rgba(255,255,255,0.03)' }}>
+              {Object.values(row).map((val, j) => {
+                const isGood = val === 'OPEN' || val === 'ACTIVE';
+                const isBad = val === 'DOWN' || val === 'BLOCKED';
+                return (
+                  <td key={j} style={{ padding: '12px 16px', fontSize: '0.85rem', color: isGood ? '#10b981' : isBad ? '#ef4444' : '#e2e8f0', borderTop: '1px solid rgba(255,255,255,0.05)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                    {String(val)}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </GlassCard>
+  );
+}
 
 export default function DashboardPage() {
-  const [selected, setSelected] = useState([]);
-  const [kpi, setKpi]           = useState('CPU');
-  const [timeFilter, setTimeFilter] = useState('24h');
-  const [error, setError]       = useState('');
-
-  // 1. Fetch des bases de données
-  const { data: bases = [], isLoading: isLoadingBases } = useQuery({
-    queryKey: ['bases'],
-    queryFn: async () => {
-      const { data } = await api.get('/api/bases');
-      if (data.length && selected.length === 0) setSelected([data[0].ID]);
-      return data;
+  const [selectedBase, setSelectedBase] = useState(() => localStorage.getItem('og_dashboard_base') || '');
+  const [selectedScripts, setSelectedScripts] = useState(() => {
+    const saved = localStorage.getItem('og_dashboard_metrics');
+    try {
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
     }
   });
 
-  // 2. Fetch des données du Dashboard (Status + Metrics)
+  // Fetch status
+  const { data: statusData } = useQuery({
+    queryKey: ['status', selectedBase],
+    queryFn: async () => {
+      if (!selectedBase) return null;
+      const res = await api.get(`/api/status/${selectedBase}`);
+      return res.data;
+    },
+    enabled: !!selectedBase
+  });
+
+  // Fetch granular audit data based on selected scripts
   const { 
-    data: dashboardData = { status: null, nodes: [], lastEntries: {} }, 
+    data: granularData, 
     isFetching: isRefreshing, 
     isLoading: isFirstLoading,
     refetch: collect 
   } = useQuery({
-    queryKey: ['dashboard', selected, timeFilter],
+    queryKey: ['dashboard_granular', selectedBase, selectedScripts],
     queryFn: async () => {
-      if (!selected.length) return { status: null, nodes: [], lastEntries: {} };
-      
-      const ids = selected;
-      const statusRes = await api.get(`/api/status/${ids[0]}`);
-      const status = statusRes.data;
-      
-      let nodes = [];
-      let lastEntries = {};
-      const now = new Date();
-
-      for (const id of ids) {
-        const base = bases.find(b => b.ID === id);
-        if (!base) continue;
-        try {
-          const { data } = await api.get(`/api/metrics/${id}?range=${timeFilter}`);
-          if (id === ids[0]) nodes = data.nodes || [];
-          
-          lastEntries[base.Instance] = {
-            Heure: now.toISOString(), 
-            Nom_Base: base.Instance, 
-            CPU: data.cpu?.busy_pct ?? 0, 
-            RAM: data.ram?.ram_pct ?? 0, 
-            Sessions: data.sessions?.ACTIVE ?? 0,
-            Blocked: data.sessions?.BLOCKED ?? 0, 
-            Transactions: data.sessions?.TOTAL_TRANSACTIONS ?? 0
-          };
-        } catch { /* skip */ }
-      }
-      return { status, nodes, lastEntries };
+      if (!selectedBase || selectedScripts.length === 0) return null;
+      const payload = {
+        id_base: parseInt(selectedBase),
+        scripts: selectedScripts
+      };
+      const response = await api.post('/api/audit/granular', payload);
+      return response.data.data;
     },
-    enabled: bases.length > 0 && selected.length > 0
+    enabled: !!selectedBase && selectedScripts.length > 0
   });
 
-  const { status, nodes, lastEntries } = dashboardData;
-  const selectedNames = selected.map(id => bases.find(b => b.ID === id)?.Instance).filter(Boolean);
+  const hasMetrics = selectedScripts.length > 0;
 
   return (
     <div>
-      <div className="page-header">
-        <div className="page-header-icon"><Activity size={28} /></div>
-        <div style={{ flex: 1 }}>
-          <h1 className="page-title text-gradient">Centre Opérationnel</h1>
-          <p className="page-subtitle">Supervision des performances SGBD (Oracle & MySQL) en temps réel</p>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+          <div className="page-header-icon"><Activity size={28} /></div>
+          <div>
+            <h1 className="page-title text-gradient">Centre Opérationnel</h1>
+            <p className="page-subtitle">Supervision des performances en temps réel</p>
+          </div>
         </div>
+        
+        {hasMetrics && (
+          <button className="btn btn-primary" style={{ padding: '0 24px', height: '46px' }} disabled={isRefreshing} onClick={() => collect()}>
+            {isRefreshing ? <><Loader2 size={18} className="spinner" /> Actualisation...</> : <><RefreshCw size={18} /> Actualiser</>}
+          </button>
+        )}
       </div>
 
-      {error && <div className="alert alert-error"><Shield size={18} /> {error}</div>}
-      
-      {isFirstLoading ? (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '50vh', gap: 20 }}>
-          <Loader2 size={48} color="#0ea5e9" className="spinner" />
-          <div style={{ fontSize: '1rem', color: '#94a3b8', fontWeight: 600, letterSpacing: '0.1em' }}>INITIALISATION DU DASHBOARD...</div>
+      {!hasMetrics ? (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
+          <GlassCard style={{ maxWidth: '500px', textAlign: 'center', padding: '40px' }}>
+            <Settings size={48} color="#0ea5e9" style={{ margin: '0 auto 20px', opacity: 0.8 }} />
+            <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#f8fafc', marginBottom: '16px' }}>Dashboard non configuré</h2>
+            <p style={{ color: '#94a3b8', marginBottom: '30px', lineHeight: 1.6 }}>
+              Votre dashboard dynamique est vide. Veuillez vous rendre sur la page "Diagnostic SQL" pour sélectionner les métriques que vous souhaitez surveiller en temps réel.
+            </p>
+            <Link to="/configuration" className="btn btn-primary" style={{ background: 'linear-gradient(135deg, #0ea5e9, #0284c7)', display: 'inline-flex', padding: '12px 24px' }}>
+              <Settings size={18} /> Configurer le Dashboard
+            </Link>
+          </GlassCard>
         </div>
       ) : (
         <>
-          <GlassCard style={{ marginBottom: 32, padding: '20px 24px', opacity: isRefreshing ? 0.7 : 1, transition: 'opacity 0.3s' }}>
-            <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
-              <div style={{ flex: 1, minWidth: 250 }}>
-                <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Database size={14} /> Cibler les instances</label>
-                <select 
-                  multiple 
-                  value={selected.map(String)}
-                  size={Math.max(2, bases.length)}
-                  onChange={e => setSelected(Array.from(e.target.selectedOptions, o => parseInt(o.value)))}
-                  style={{ width: '100%', borderRadius: 12, padding: '4px', background: 'rgba(15, 23, 42, 0.6)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', outline: 'none' }}>
-                  {bases.map(b => (
-                    <option key={b.ID} value={b.ID} style={{ padding: '10px 15px', borderRadius: 8, margin: '2px 0', cursor: 'pointer' }}>
-                      {b.Instance} — {b.IP} ({b.Type})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <button className="btn btn-primary" style={{ height: 50, padding: '0 32px' }} disabled={isRefreshing || !selected.length} onClick={() => collect()}>
-                {isRefreshing ? <><RefreshCw size={18} className="spinner" /> SONDAGE EN COURS</> : <><RefreshCw size={18} /> FORCER L'ACTUALISATION</>}
-              </button>
+          {statusData && <StatusBanner status={statusData} />}
+          
+          {isFirstLoading ? (
+             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '30vh', gap: 20 }}>
+               <Loader2 size={48} color="#0ea5e9" className="spinner" />
+               <div style={{ fontSize: '1rem', color: '#94a3b8', fontWeight: 600, letterSpacing: '0.1em' }}>CHARGEMENT DES MÉTRIQUES...</div>
+             </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '24px' }}>
+              {granularData && Object.entries(granularData).map(([scriptName, dataArray]) => (
+                <DynamicMetricCard key={scriptName} scriptName={scriptName} dataArray={dataArray} />
+              ))}
             </div>
-            {isRefreshing && (
-              <div style={{ marginTop: 12, fontSize: '0.7rem', color: '#0ea5e9', fontWeight: 700, textAlign: 'right', animation: 'fadeIn 0.3s' }}>
-                <Loader2 size={12} className="spinner" style={{ display: 'inline', marginRight: 6 }} /> MISE À JOUR DU CACHE EN COURS...
-              </div>
-            )}
-          </GlassCard>
-
-      <StatusBanner status={status} />
-
-      <div className="grid-3" style={{ marginBottom: 32 }}>
-        {KPI_OPTIONS.map(k => {
-          const isActive = kpi === k.key;
-          return (
-            <GlassCard key={k.key} accent={k.color} glow={isActive} onClick={() => setKpi(k.key)}
-              style={{ padding: '20px', border: isActive ? `1px solid ${k.color}50` : undefined, cursor: 'pointer' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-                <div>
-                  <div style={{ color: '#94a3b8', fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>
-                    {k.label}
-                  </div>
-                  <div style={{ color: isActive ? k.color : '#e2e8f0', fontSize: '1.8rem', fontWeight: 800, fontFamily: "'Inter', sans-serif" }}>
-                    {selectedNames.length === 1 && lastEntries[selectedNames[0]]
-                      ? `${Number(lastEntries[selectedNames[0]][k.key]).toFixed(1)}${k.unit}` 
-                      : '---'}
-                  </div>
-                </div>
-                <div style={{ padding: 12, background: `${k.color}15`, borderRadius: 12, color: k.color }}>
-                  <k.Icon size={24} />
-                </div>
-              </div>
-            </GlassCard>
-          );
-        })}
-      </div>
-
-      <div className="grid-2" style={{ marginBottom: 32 }}>
-        <GlassCard accent="#0ea5e9" style={{ padding: '24px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-            <Activity size={18} color="#0ea5e9" />
-            <h3 style={{ fontSize: '0.9rem', fontWeight: 700, margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Utilisation CPU</h3>
-          </div>
-          <GaugeChart 
-            value={selectedNames.length === 1 && lastEntries[selectedNames[0]] ? lastEntries[selectedNames[0]].CPU : 0} 
-            label="Charge Actuelle" 
-            unit="%" 
-            color="#0ea5e9" 
-          />
-        </GlassCard>
-
-        <GlassCard accent="#8b5cf6" style={{ padding: '24px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-            <Server size={18} color="#8b5cf6" />
-            <h3 style={{ fontSize: '0.9rem', fontWeight: 700, margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Utilisation RAM</h3>
-          </div>
-          <GaugeChart 
-            value={selectedNames.length === 1 && lastEntries[selectedNames[0]] ? lastEntries[selectedNames[0]].RAM : 0} 
-            label="Mémoire Occupée" 
-            unit="%" 
-            color="#8b5cf6" 
-          />
-        </GlassCard>
-      </div>
-
-      <div className="grid-3" style={{ marginBottom: 32 }}>
-        <GlassCard accent="#f59e0b" style={{ padding: '24px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-            <RefreshCw size={18} color="#f59e0b" />
-            <h3 style={{ fontSize: '0.9rem', fontWeight: 700, margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Taux de Transaction</h3>
-          </div>
-          <GaugeChart 
-            value={selectedNames.length === 1 && lastEntries[selectedNames[0]] ? lastEntries[selectedNames[0]].Transactions : 0} 
-            displayValue={selectedNames.length === 1 && lastEntries[selectedNames[0]] ? lastEntries[selectedNames[0]].Transactions : 0}
-            maxValue={1000}
-            label="Débit (Commits)" 
-            unit="" 
-            color="#f59e0b" 
-          />
-        </GlassCard>
-
-        <GlassCard accent="#10b981" style={{ padding: '24px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-            <Users size={18} color="#10b981" />
-            <h3 style={{ fontSize: '0.9rem', fontWeight: 700, margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Connexions Actives</h3>
-          </div>
-          <GaugeChart 
-            value={selectedNames.length === 1 && lastEntries[selectedNames[0]] ? lastEntries[selectedNames[0]].Sessions : 0} 
-            displayValue={selectedNames.length === 1 && lastEntries[selectedNames[0]] ? lastEntries[selectedNames[0]].Sessions : 0}
-            maxValue={200}
-            label="Utilisateurs" 
-            unit="" 
-            color="#10b981" 
-          />
-        </GlassCard>
-
-        <GlassCard 
-          accent="#ef4444" 
-          glow={selectedNames.length === 1 && lastEntries[selectedNames[0]]?.Blocked > 0}
-          style={{ 
-            padding: '24px', 
-            background: (selectedNames.length === 1 && lastEntries[selectedNames[0]]?.Blocked > 0) ? 'rgba(239, 68, 68, 0.1)' : undefined,
-            border: (selectedNames.length === 1 && lastEntries[selectedNames[0]]?.Blocked > 0) ? '1px solid #ef444450' : undefined
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-            <Shield size={18} color="#ef4444" />
-            <h3 style={{ fontSize: '0.9rem', fontWeight: 700, margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Sessions Bloquées</h3>
-          </div>
-          <div style={{ textAlign: 'center', padding: '20px 0' }}>
-            <div style={{ 
-              fontSize: '3.5rem', 
-              fontWeight: 900, 
-              color: (selectedNames.length === 1 && lastEntries[selectedNames[0]]?.Blocked > 0) ? '#ef4444' : '#f8fafc',
-              textShadow: (selectedNames.length === 1 && lastEntries[selectedNames[0]]?.Blocked > 0) ? '0 0 30px #ef4444' : 'none',
-              animation: (selectedNames.length === 1 && lastEntries[selectedNames[0]]?.Blocked > 0) ? 'pulseGlow 1.5s infinite' : 'none'
-            }}>
-              {selectedNames.length === 1 && lastEntries[selectedNames[0]] ? lastEntries[selectedNames[0]].Blocked : 0}
-            </div>
-            <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 700, marginTop: 10 }}>
-              {selectedNames.length === 1 && lastEntries[selectedNames[0]]?.Blocked > 0 ? 'ALERTE : CONFLITS DÉTECTÉS' : 'AUCUN BLOCAGE'}
-            </div>
-          </div>
-        </GlassCard>
-      </div>
-
-      {nodes.length > 0 && (
-        <GlassCard style={{ padding: '32px 24px', marginBottom: 32 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 24 }}>
-            <Server size={20} color="#10b981" />
-            <h2 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>État des Nœuds</h2>
-          </div>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: '0 8px' }}>
-              <thead>
-                <tr>
-                  {Object.keys(nodes[0]).map(key => (
-                    <th key={key} style={{ padding: '12px 16px', textAlign: 'left', color: '#94a3b8', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                      {key.replace('_', ' ')}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {nodes.map((node, i) => (
-                  <tr key={i} className="table-row-hover" style={{ background: 'rgba(255,255,255,0.03)', transition: 'transform 0.2s' }}>
-                    {Object.values(node).map((val, j) => (
-                      <td key={j} style={{ padding: '16px', fontSize: '0.85rem', color: val === 'OPEN' || val === 'ACTIVE' || val === 'READ WRITE' ? '#10b981' : '#e2e8f0', fontWeight: val === 'OPEN' || val === 'ACTIVE' ? 700 : 400, borderTop: '1px solid rgba(255,255,255,0.05)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                        {String(val)}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </GlassCard>
-      )}
-      </>
+          )}
+        </>
       )}
     </div>
   );

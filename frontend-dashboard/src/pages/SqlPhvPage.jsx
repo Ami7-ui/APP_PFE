@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api';
 import GlassCard from '../components/GlassCard';
-import { Activity, Database, LayoutList, ChevronRight, ChevronDown, X, AlertCircle, Loader2, GitBranch, Code, Bot } from 'lucide-react';
+import { Activity, Database, LayoutList, ChevronRight, ChevronDown, X, AlertCircle, Loader2, GitBranch, Code, Bot, Search } from 'lucide-react';
 import AiResponseViewer from '../components/AiResponseViewer';
 
 export default function SqlPhvPage() {
@@ -9,6 +9,7 @@ export default function SqlPhvPage() {
   const [selectedBase, setSelectedBase] = useState('');
   
   const [phvList, setPhvList] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
   const [loadingList, setLoadingList] = useState(false);
   
   const [planDetails, setPlanDetails] = useState(null);
@@ -91,27 +92,41 @@ export default function SqlPhvPage() {
 
   // 4. Analyser le plan avec l'IA
   const handleAnalyzePlans = async () => {
-    if (!selectedSqlId || !planDetails) return;
+    if (!selectedSqlId) return;
     
-    // Trouver la requête SQL originale
+    // Trouver la requête SQL originale et la liste des PHVs
     const row = phvList.find(r => (r.SQL_ID || r.sql_id) === selectedSqlId);
     const query = row ? (row.SCRIPT_SQL || row.script_sql) : "";
-    
+    const phvString = row ? (row.PHV_LIST || row.phv_list || "") : "";
+    const phvs = phvString.split(',').map(s => s.trim()).filter(Boolean);
+
     setIsAnalyzing(true);
     setAiAnalysisResult('');
     
     try {
+      // 1. Récupérer les détails de TOUS les plans en parallèle
+      const allPlans = await Promise.all(phvs.map(async (p) => {
+        try {
+          const r = await api.get(`/api/sql-plan-details/${selectedBase}?sql_id=${selectedSqlId}&phv=${p}`);
+          return {
+            phv: p,
+            steps: r.data.data || []
+          };
+        } catch (e) {
+          console.error(`Erreur chargement PHV ${p}`, e);
+          return { phv: p, steps: [] };
+        }
+      }));
+
+      // 2. Envoyer la collection complète au backend
       const response = await api.post('/api/ai/analyze-phv', {
         sql_id: selectedSqlId,
         query: query || "Requête non disponible",
-        plans: [{
-          phv: selectedPhv,
-          steps: planDetails
-        }]
+        plans: allPlans
       });
       setAiAnalysisResult(response.data.analysis);
     } catch (err) {
-      setAiAnalysisResult("Erreur lors de l'analyse IA : " + (err.response?.data?.detail || err.message));
+      setAiAnalysisResult("Erreur lors de l'analyse comparative : " + (err.response?.data?.detail || err.message));
     } finally {
       setIsAnalyzing(false);
     }
@@ -167,6 +182,32 @@ export default function SqlPhvPage() {
               {phvList.length > 0 && <span className="badge" style={{ background: 'rgba(139, 92, 246, 0.15)', color: '#a78bfa' }}>{phvList.length} requêtes</span>}
             </div>
 
+            <div style={{ padding: '0 20px 15px 20px' }}>
+              <div style={{ position: 'relative' }}>
+                <Search size={16} color="#94a3b8" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+                <input 
+                  type="text"
+                  placeholder="Rechercher un SQL ID..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px 10px 38px',
+                    background: 'rgba(15, 23, 42, 0.4)',
+                    border: '1px solid rgba(139, 92, 246, 0.2)',
+                    borderRadius: '10px',
+                    color: '#f8fafc',
+                    fontSize: '0.85rem',
+                    outline: 'none',
+                    transition: 'all 0.2s',
+                    boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)'
+                  }}
+                  onFocus={(e) => e.target.style.borderColor = 'rgba(139, 92, 246, 0.5)'}
+                  onBlur={(e) => e.target.style.borderColor = 'rgba(139, 92, 246, 0.2)'}
+                />
+              </div>
+            </div>
+
             {loadingList ? (
               <div style={{ padding: '40px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px' }}>
                 <Loader2 size={30} className="spinner" color="#0ea5e9" />
@@ -175,6 +216,10 @@ export default function SqlPhvPage() {
             ) : phvList.length === 0 ? (
               <div style={{ padding: '30px', textAlign: 'center', color: '#64748b', fontSize: '0.9rem' }}>
                 Aucune requête avec de multiples plans trouvée sur cette instance.
+              </div>
+            ) : phvList.filter(row => (row.SQL_ID || row.sql_id || "").toLowerCase().includes(searchTerm.toLowerCase())).length === 0 ? (
+              <div style={{ padding: '30px', textAlign: 'center', color: '#94a3b8', fontSize: '0.9rem', fontStyle: 'italic' }}>
+                Aucun SQL ID trouvé pour "{searchTerm}".
               </div>
             ) : (
               <div style={{ overflowX: 'auto', maxHeight: '500px' }}>
@@ -187,8 +232,10 @@ export default function SqlPhvPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {phvList.map((row, idx) => {
-                      const sqlId = row.SQL_ID || row.sql_id;
+                    {phvList
+                      .filter(row => (row.SQL_ID || row.sql_id || "").toLowerCase().includes(searchTerm.toLowerCase()))
+                      .map((row, idx) => {
+                        const sqlId = row.SQL_ID || row.sql_id;
                       const phvs = (row.PHV_LIST || row.phv_list || "").split(',').map(s => s.trim());
                       const scriptSql = row.SCRIPT_SQL || row.script_sql;
                       const isActive = selectedSqlId === sqlId;
@@ -312,7 +359,7 @@ export default function SqlPhvPage() {
               </div>
               
               <div style={{ display: 'flex', gap: '10px' }}>
-                {planDetails && (
+                {selectedSqlId && (
                   <button 
                     onClick={handleAnalyzePlans} 
                     disabled={isAnalyzing}
@@ -333,7 +380,7 @@ export default function SqlPhvPage() {
                     }}
                   >
                     {isAnalyzing ? <Loader2 size={16} className="spinner" /> : <Bot size={16} />}
-                    {isAnalyzing ? "Analyse en cours par nvidia_senior..." : "Analyser avec l'IA"}
+                    {isAnalyzing ? "Comparaison en cours par nvidia_senior..." : "Comparer tous les PHVs avec l'IA"}
                   </button>
                 )}
                 {planDetails && (

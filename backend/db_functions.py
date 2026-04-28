@@ -661,7 +661,7 @@ def get_reports_history(nom_base_cible):
 
 class AuditPDF(FPDF):
     def header(self):
-        # En-tête stylisé
+        # En-tête stylisé — NOTE : ne pas appeler add_page() ici
         self.set_fill_color(15, 23, 42)
         self.rect(0, 0, 210, 40, 'F')
         self.set_font('helvetica', 'B', 24)
@@ -670,7 +670,8 @@ class AuditPDF(FPDF):
         self.set_font('helvetica', 'I', 10)
         self.set_text_color(148, 163, 184)
         self.cell(0, 5, f'Généré le {datetime.datetime.now().strftime("%d/%m/%Y à %H:%M")}', 0, 1, 'C')
-        self.ln(15)
+        # ln fixe à 10 : assez pour marquer la fin du header sans pousser une page supplémentaire
+        self.set_y(45)
 
     def footer(self):
         self.set_y(-15)
@@ -807,60 +808,71 @@ def flatten_dict(d, parent_key='', sep='.'):
     return dict(items)
 
 def draw_pdf_table(pdf, category_name, flat_data_dict):
+    """Dessine un tableau clé/valeur. Ignore silencieusement si pas de données."""
+    if not flat_data_dict:
+        return
+
+    # Saut de page intelligent avant le titre (évite les pages vides inter-sections)
+    if pdf.get_y() > 250:
+        pdf.add_page()
+
     pdf.set_font('helvetica', 'B', 12)
-    # Background slate dark (#0F172A)
-    pdf.set_fill_color(15, 23, 42) 
+    pdf.set_fill_color(15, 23, 42)
     pdf.set_text_color(255, 255, 255)
     pdf.cell(0, 10, f" METRIQUES : {str(category_name).upper()}", border=1, ln=1, align='L', fill=True)
-    
+
     # En-tête de tableau
     pdf.set_font('helvetica', 'B', 10)
-    # Background sky blue for headers (#0EA5E9)
     pdf.set_fill_color(14, 165, 233)
     pdf.set_text_color(255, 255, 255)
-    
+
     col_width1 = 80
     col_width2 = pdf.w - pdf.l_margin - pdf.r_margin - col_width1
-    
+
     pdf.cell(col_width1, 8, "Paramètre", border=1, align='C', fill=True)
     pdf.cell(col_width2, 8, "Valeur", border=1, ln=1, align='C', fill=True)
-    
+
     pdf.set_font('helvetica', '', 9)
     pdf.set_text_color(30, 41, 59)
-    
+
     for key, value in flat_data_dict.items():
-        val_str = str(value)
-        val_str = val_str.replace('\n', ' ')
-        
+        val_str = str(value).replace('\n', ' ')
+
         start_x = pdf.get_x()
         start_y = pdf.get_y()
-        
-        # Gestion du saut de page si on est en bas
-        if start_y > 270:
+
+        # Saut de page si on arrive en bas (un seul saut par ligne)
+        if start_y > 265:
             pdf.add_page()
+            # Redessiner l'en-tête de colonne sur la nouvelle page
+            pdf.set_font('helvetica', 'B', 10)
+            pdf.set_fill_color(14, 165, 233)
+            pdf.set_text_color(255, 255, 255)
+            pdf.cell(col_width1, 8, "Paramètre", border=1, align='C', fill=True)
+            pdf.cell(col_width2, 8, "Valeur", border=1, ln=1, align='C', fill=True)
+            pdf.set_font('helvetica', '', 9)
+            pdf.set_text_color(30, 41, 59)
             start_x = pdf.get_x()
             start_y = pdf.get_y()
-            
+
         # Draw Key
         pdf.set_xy(start_x, start_y)
         pdf.multi_cell(col_width1, 6, str(key), border=0, align='L')
         end_y1 = pdf.get_y()
-        
+
         # Draw Value
         pdf.set_xy(start_x + col_width1, start_y)
         pdf.multi_cell(col_width2, 6, val_str, border=0, align='L')
         end_y2 = pdf.get_y()
-        
-        # Calcul de la hauteur de la ligne
+
         max_y = max(end_y1, end_y2)
         row_height = max_y - start_y
-        
-        # Tracer les bordures rectangulaires et ajuster
+
         pdf.rect(start_x, start_y, col_width1, row_height)
         pdf.rect(start_x + col_width1, start_y, col_width2, row_height)
-        
+
         pdf.set_y(max_y)
-    
+
     pdf.ln(5)
  
 def draw_pdf_data_table(pdf, script_name, rows):
@@ -868,19 +880,23 @@ def draw_pdf_data_table(pdf, script_name, rows):
     Dessine un tableau pour les résultats d'un script (liste de dictionnaires).
     Avec gestion dynamique des largeurs et hauteurs pour éviter le chevauchement.
     Priorise la colonne SQL_TEXT pour lui donner un maximum d'espace (60%).
+    Retourne immédiatement (sans rien écrire) si rows est vide.
     """
+    # --- Garde-fou : on ne dessine RIEN si pas de données exploitables ---
+    if not rows or not isinstance(rows, list) or len(rows) == 0:
+        return
+    # Ignorer les lignes qui ne contiennent qu'une clé "Erreur"
+    if all(len(r) == 1 and 'Erreur' in r for r in rows if isinstance(r, dict)):
+        return
+
+    # Saut de page intelligent avant le titre de section
+    if pdf.get_y() > 250:
+        pdf.add_page()
+
     pdf.set_font('helvetica', 'B', 12)
-    # Background slate dark (#0F172A)
-    pdf.set_fill_color(15, 23, 42) 
+    pdf.set_fill_color(15, 23, 42)
     pdf.set_text_color(255, 255, 255)
     pdf.cell(0, 10, f" RESULTATS SCRIPT : {str(script_name).upper()}", border=1, ln=1, align='L', fill=True)
-    
-    if not rows or not isinstance(rows, list):
-        pdf.set_font('helvetica', 'I', 10)
-        pdf.set_text_color(100, 100, 100)
-        pdf.cell(0, 8, "  Aucune donnée retournée ou format invalide.", border=1, ln=1)
-        pdf.ln(5)
-        return
 
     # En-tête de tableau (colonnes)
     headers = list(rows[0].keys())
@@ -1054,22 +1070,36 @@ def save_audit_report(id_base, audit_data, ai_analysis_string):
     pdf.chapter_body(f"Base de données cible : {nom_base_pdf}\nDate de génération : {datetime.datetime.now().strftime('%d/%m/%Y à %H:%M')}")
     
     # Section 2 : Métriques brutes (itération sur le JSON)
-    pdf.chapter_title("2. Données Brutes de l'Audit")
+    # On affiche le titre de section SEULEMENT si au moins une catégorie a des données
+    has_data = False
     for categorie, data in audit_data_pdf.items():
-        if isinstance(data, list):
-            # Format granulaire (liste de lignes)
-            draw_pdf_data_table(pdf, categorie, data)
-        elif isinstance(data, dict) and not 'error' in data:
-            # Format classique ou dictionnaire
-            flat_data = flatten_dict(data)
-            draw_pdf_table(pdf, categorie, flat_data)
+        if isinstance(data, list) and len(data) > 0:
+            # Ignorer les listes qui ne contiennent que des entrées d'erreur
+            if not all(len(r) == 1 and 'Erreur' in r for r in data if isinstance(r, dict)):
+                has_data = True
+                break
+        elif isinstance(data, dict) and 'error' not in data and len(data) > 0:
+            has_data = True
+            break
 
-    # Séparateur et nouvelle page
-    pdf.add_page()
-    
-    # Section 3 : Expertise IA
-    pdf.chapter_title("3. Expertise IA Complète (LLaMA + Nvidia)")
-    pdf.chapter_body(ai_analysis_pdf)
+    if has_data:
+        pdf.chapter_title("2. Données Brutes de l'Audit")
+        for categorie, data in audit_data_pdf.items():
+            if isinstance(data, list):
+                # Format granulaire (liste de lignes) — draw_pdf_data_table gère le cas vide
+                draw_pdf_data_table(pdf, categorie, data)
+            elif isinstance(data, dict) and 'error' not in data and len(data) > 0:
+                # Format classique ou dictionnaire
+                flat_data = flatten_dict(data)
+                draw_pdf_table(pdf, categorie, flat_data)
+
+    # Section 3 : Expertise IA — saut de page intelligent (pas systématique)
+    if ai_analysis_pdf and ai_analysis_pdf.strip():
+        # On ne saute de page que si on n'est pas déjà sur une page quasi-vide
+        if pdf.get_y() > 60:
+            pdf.add_page()
+        pdf.chapter_title("3. Expertise IA Complète (LLaMA + Nvidia)")
+        pdf.chapter_body(ai_analysis_pdf)
 
     # Génération binaire spécifique pour fpdf 1.7.2
     try:

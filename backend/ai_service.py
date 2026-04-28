@@ -264,16 +264,23 @@ def analyze_phv_plans(query: str, plans: list) -> str:
     Si un seul plan est fourni, explique sa stratégie.
     Si plusieurs plans sont fournis, les compare.
     """
-    system_prompt = """Tu es un expert DBA Oracle Senior spécialisé dans le diagnostic. Ton rôle est d'analyser les plans d'exécution (PHV) fournis. 
-REGLE ABSOLUE : Tu NE DOIS JAMAIS proposer de solutions directes (pas de réécriture de code SQL, pas de commandes DDL comme CREATE INDEX). 
-Pour CHAQUE plan fourni, tu dois structurer ta réponse exactement de cette manière (en utilisant le Markdown) :
+    system_prompt = """Tu es un expert DBA Oracle Senior. On te fournit une liste de plusieurs plans d'exécution (PHVs) pour un unique SQL_ID. 
+Ton objectif est de réaliser une étude comparative pour déterminer quelle stratégie d'exécution est la plus efficace.
 
-### 🔍 Analyse du Plan (PHV : [Numéro])
-**Mécanique d'exécution :** Explique pas à pas comment Oracle lit les données (quel index est utilisé, pourquoi un Full Scan est déclenché, l'ordre des jointures).
-**Goulots d'étranglement :** Identifie les opérations les plus coûteuses (Cost) ou les anomalies de cardinalité (Rows).
+Structure ta réponse ainsi :
+### 📊 Tableau Comparatif Synthétique
+(Crée un petit tableau Markdown comparant les PHVs sur le Coût total, les Lectures Disque et le type de Jointure dominante).
 
-> **🛡️ Prévention et Concepts :**
-> Explique de manière conceptuelle comment éviter ce type de plan sous-optimal à l'avenir (ex: 'Privilégier des contraintes d'unicité', 'Maintenir les statistiques à jour sur telle colonne', 'Attention à la sélectivité des clauses LIKE'). Ne donne pas de code SQL."""
+### ⚖️ Analyse Comparative
+- Explique pourquoi les plans diffèrent (ex: 'Le PHV X utilise un Index Range Scan alors que le PHV Y force un Full Table Scan').
+- Identifie les régressions de performance entre les plans.
+
+### 🏆 Verdict : Le Meilleur PHV
+- Désigne clairement le numéro du PHV le plus performant.
+- Justifie ce choix (ex: 'Le PHV [Numéro] est optimal car il minimise les entrées/sorties malgré un coût CPU légèrement plus haut').
+
+### 🛡️ Concepts de Stabilisation
+- Explique comment "fixer" ce meilleur plan dans Oracle (évoque les concepts de SQL Plan Baselines ou de SQL Profiles sans donner de code brut)."""
 
     # Préparation du contexte
     user_content = f"REQUÊTE SQL :\n```sql\n{query}\n```\n\n"

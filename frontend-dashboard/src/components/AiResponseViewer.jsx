@@ -58,7 +58,44 @@ const AiResponseViewer = ({ content }) => {
           },
           h1: ({ children }) => <h1 style={{ color: '#fff', fontSize: '1.4rem', fontWeight: 800, margin: '28px 0 16px 0', display: 'flex', alignItems: 'center', gap: '10px' }}><Hash size={20} color="#8b5cf6" /> {children}</h1>,
           h2: ({ children }) => <h2 style={{ color: '#fff', fontSize: '1.2rem', fontWeight: 700, margin: '32px 0 14px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>{children}</h2>,
-          h3: ({ children }) => <h3 style={{ color: '#fff', fontSize: '1.1rem', fontWeight: 700, margin: '40px 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px', borderLeft: '3px solid #38bdf8', paddingLeft: '12px' }}>{children}</h3>,
+          h3: ({ children }) => {
+            const isVerdict = String(children).includes('Verdict');
+            if (isVerdict) {
+              return (
+                <h3 style={{ 
+                  color: '#10b981', 
+                  fontSize: '1.2rem', 
+                  fontWeight: 800, 
+                  margin: '40px 0 16px 0', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '12px', 
+                  background: 'rgba(16, 185, 129, 0.1)',
+                  padding: '12px 20px',
+                  borderRadius: '10px',
+                  border: '1px solid rgba(16, 185, 129, 0.2)',
+                  boxShadow: '0 4px 20px rgba(16, 185, 129, 0.1)'
+                }}>
+                  🏆 {children}
+                </h3>
+              );
+            }
+            return (
+              <h3 style={{ 
+                color: '#fff', 
+                fontSize: '1.1rem', 
+                fontWeight: 700, 
+                margin: '40px 0 16px 0', 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '8px', 
+                borderLeft: '3px solid #38bdf8', 
+                paddingLeft: '12px' 
+              }}>
+                {children}
+              </h3>
+            );
+          },
           blockquote: ({ children }) => (
             <blockquote style={{ 
               borderLeft: '4px solid #f59e0b', 

@@ -7,9 +7,15 @@ import { Settings2, Database, Play, CheckCircle, Terminal, AlertCircle, Loader2,
 export default function ConfigurationPage() {
   const navigate = useNavigate();
   const [bases, setBases] = useState([]);
-  const [selectedBase, setSelectedBase] = useState('');
+  const [selectedBase, setSelectedBase] = useState(() => localStorage.getItem('og_dashboard_base') || '');
   const [categories, setCategories] = useState({});
-  const [selectedScripts, setSelectedScripts] = useState([]);
+  const [selectedScripts, setSelectedScripts] = useState(() => {
+    const saved = localStorage.getItem('og_dashboard_metrics');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { return []; }
+    }
+    return [];
+  });
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null);
   const [error, setError] = useState('');
@@ -33,7 +39,7 @@ export default function ConfigurationPage() {
     // Charger les bases
     api.get('/api/bases').then(r => { 
       setBases(r.data); 
-      if (r.data.length > 0) setSelectedBase(String(r.data[0].ID)); 
+      if (r.data.length > 0 && !localStorage.getItem('og_dashboard_base')) setSelectedBase(String(r.data[0].ID)); 
     }).catch(() => setError("Erreur de chargement des bases cibles."));
 
     // Charger les scripts catégorisés
@@ -44,6 +50,16 @@ export default function ConfigurationPage() {
       setError("Erreur de chargement des métriques.");
     });
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem('og_dashboard_metrics', JSON.stringify(selectedScripts));
+  }, [selectedScripts]);
+
+  useEffect(() => {
+    if (selectedBase) {
+      localStorage.setItem('og_dashboard_base', selectedBase);
+    }
+  }, [selectedBase]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -225,11 +241,14 @@ export default function ConfigurationPage() {
                 {selectedScripts.length > 0 && (
                   <button 
                     type="button"
-                    onClick={() => setSelectedScripts([])}
+                    onClick={() => {
+                      setSelectedScripts([]);
+                      localStorage.removeItem('og_dashboard_metrics');
+                    }}
                     className="btn btn-ghost"
-                    style={{ padding: '4px 8px', fontSize: '0.75rem', color: '#94a3b8', border: '1px solid rgba(148, 163, 184, 0.3)' }}
+                    style={{ padding: '4px 8px', fontSize: '0.75rem', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)' }}
                   >
-                    Effacer
+                    Réinitialiser le Dashboard
                   </button>
                 )}
               </div>
