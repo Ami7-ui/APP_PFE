@@ -6,40 +6,17 @@ export default function GlassCard({ children, accent = 'rgba(14, 165, 233)', glo
   
   return (
     <div 
-      className={`glass-card ${className}`}
+      className={`glass-panel ${onClick ? 'hover-lift' : ''} ${className}`}
       onClick={onClick}
       style={{
-        background: 'linear-gradient(135deg, rgba(15,23,42,0.6) 0%, rgba(8,14,33,0.8) 100%)',
-        border: '1px solid rgba(255,255,255,0.06)',
-        borderTop: '1px solid rgba(255,255,255,0.12)',
-        borderRadius: 20,
         padding: '28px 32px',
-        boxShadow: glow 
-          ? `0 0 30px ${baseAccent}20, 0 10px 30px rgba(0,0,0,0.5)` 
-          : '0 10px 30px rgba(0,0,0,0.4)',
-        backdropFilter: 'blur(24px)',
-        WebkitBackdropFilter: 'blur(24px)',
         position: 'relative',
         overflow: 'hidden',
-        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
         cursor: onClick ? 'pointer' : 'default',
+        boxShadow: glow 
+          ? `0 0 30px ${baseAccent}20, 0 10px 30px rgba(0,0,0,0.3)` 
+          : '0 8px 32px rgba(0,0,0,0.3)',
         ...style
-      }}
-      onMouseEnter={(e) => {
-        if(onClick) {
-          e.currentTarget.style.transform = 'translateY(-4px)';
-          e.currentTarget.style.boxShadow = `0 15px 40px rgba(0,0,0,0.6), 0 0 40px ${baseAccent}30`;
-          e.currentTarget.style.borderColor = `rgba(255,255,255,0.15)`;
-        }
-      }}
-      onMouseLeave={(e) => {
-        if(onClick) {
-          e.currentTarget.style.transform = 'translateY(0)';
-          e.currentTarget.style.boxShadow = glow 
-            ? `0 0 30px ${baseAccent}20, 0 10px 30px rgba(0,0,0,0.5)` 
-            : '0 10px 30px rgba(0,0,0,0.4)';
-          e.currentTarget.style.borderColor = `rgba(255,255,255,0.06)`;
-        }
       }}
     >
       {/* Top shimmer accent line */}

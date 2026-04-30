@@ -16,13 +16,13 @@ import useAppStore from './store/useAppStore';
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: {
-      staleTime: Infinity,
-      refetchOnWindowFocus: false,
-      refetchOnMount: false,
-      refetchOnReconnect: false,
-      retry: false,
-    },
+      queries: {
+        staleTime: 5000,
+        refetchOnWindowFocus: true,
+        refetchOnMount: true,
+        refetchOnReconnect: true,
+        retry: 1,
+      },
   },
 });
 
@@ -33,13 +33,13 @@ class ErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div style={{ padding: 40, color: '#fca5a5', background: '#030816', minHeight: '100vh', fontFamily: 'monospace' }}>
+        <div style={{ padding: 40, color: '#fca5a5', background: 'var(--bg-main)', minHeight: '100vh', fontFamily: 'monospace' }}>
           <h1 style={{ color: '#ef4444' }}>⚠️ Erreur d'exécution React</h1>
           <p style={{ marginTop: 20, marginBottom: 10, fontWeight: 'bold' }}>Message d'erreur :</p>
-          <pre style={{ background: '#0f172a', padding: 20, borderRadius: 8, border: '1px solid #ef444450', overflow: 'auto' }}>
+          <pre style={{ background: 'var(--glass-bg)', backdropFilter: 'blur(10px)', padding: 20, borderRadius: 8, border: '1px solid rgba(239, 68, 68, 0.3)', overflow: 'auto' }}>
             {this.state.error?.toString()}
           </pre>
-          <button onClick={() => window.location.reload()} style={{ marginTop: 20, padding: '10px 20px', background: '#ef4444', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+          <button onClick={() => window.location.reload()} style={{ marginTop: 20, padding: '10px 20px', background: 'rgba(239, 68, 68, 0.2)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.5)', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 0 15px rgba(239, 68, 68, 0.2)' }}>
             Recharger la page
           </button>
         </div>
@@ -74,10 +74,10 @@ export default function App() {
           <Route path="/*" element={
             <ProtectedRoute>
               <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', width: '100%' }}>
-                <div style={{ height: 4, background: 'linear-gradient(90deg, #0ea5e9, #8b5cf6)', opacity: 0.5 }}></div>
+                <div style={{ height: 4, background: 'linear-gradient(90deg, var(--accent-cyan), var(--accent-purple), var(--accent-emerald))', boxShadow: '0 0 15px var(--glow-purple)', zIndex: 50 }}></div>
                 <div style={{ display: 'flex', flex: 1 }}>
                   <Sidebar user={user} onLogout={handleLogout} />
-                  <main className="page-content" style={{ flex: 1, padding: '20px', backgroundColor: '#0c0d0d' }}>
+                  <main className="page-content" style={{ flex: 1, padding: '20px', background: 'transparent' }}>
                     <Routes>
                       <Route path="/" element={<DashboardPage user={user} />} />
                       <Route path="/dashboard" element={<Navigate to="/" replace />} />

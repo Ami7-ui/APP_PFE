@@ -189,6 +189,8 @@ def supprimer_base_cible(id_base):
 
 def get_db_connection(id_base):
     conn_ref = get_oracle_connection()
+    if not conn_ref:
+        return None, None, "Impossible de se connecter au référentiel."
     try:
         cursor = conn_ref.cursor()
         sql = """
@@ -200,6 +202,10 @@ def get_db_connection(id_base):
         cursor.execute(sql, id=id_base)
         row = cursor.fetchone()
         
+        # Fermer la connexion au référentiel dès qu'on a les infos
+        cursor.close()
+        conn_ref.close()
+        
         if not row:
             return None, None, "Base cible introuvable dans le référentiel."
             
@@ -208,6 +214,7 @@ def get_db_connection(id_base):
         
         if 'ORACLE' in type_upper:
             dsn = f"{ip}:{port}/{instance}"
+            # Utilisation de oracledb pour la cible
             conn_cible = oracledb.connect(user=user, password=mdp, dsn=dsn)
             return conn_cible, "ORACLE", None
         elif 'MYSQL' in type_upper:
@@ -218,9 +225,10 @@ def get_db_connection(id_base):
         else:
             return None, None, f"Type de SGBD non supporté : {type_sgbd}"
     except Exception as e:
+        if 'conn_ref' in locals() and conn_ref:
+            try: conn_ref.close()
+            except: pass
         return None, None, f"Erreur de connexion : {str(e)}"
-    finally:
-        if 'cursor' in locals(): cursor.close()
 
 def get_target_credentials(id_base):
     conn = get_oracle_connection()
@@ -232,7 +240,33 @@ def get_target_credentials(id_base):
         if 'cursor' in locals(): cursor.close()
 
 def get_statistiques_sessions(id_base):
-    return {"ACTIVE": 0, "INACTIVE": 0, "BLOCKED": 0, "TOTAL_TRANSACTIONS": 0}
+    conn, db_type, err = get_db_connection(id_base)
+    if err or not conn: 
+        return {"ACTIVE": 0, "INACTIVE": 0, "BLOCKED": 0, "TOTAL_TRANSACTIONS": 0}
+    try:
+        cursor = conn.cursor()
+        if db_type == "ORACLE":
+            sql = """
+                SELECT 
+                    COUNT(CASE WHEN STATUS = 'ACTIVE' THEN 1 END) as ACTIVE,
+                    COUNT(CASE WHEN STATUS = 'INACTIVE' THEN 1 END) as INACTIVE,
+                    COUNT(CASE WHEN BLOCKING_SESSION IS NOT NULL THEN 1 END) as BLOCKED
+                FROM V$SESSION
+            """
+            cursor.execute(sql)
+            row = cursor.fetchone()
+            conn.close()
+            return {
+                "ACTIVE": row[0] if row else 0,
+                "INACTIVE": row[1] if row else 0,
+                "BLOCKED": row[2] if row else 0,
+                "TOTAL_TRANSACTIONS": 0 # Nécessite V$TRANSACTION, souvent vide
+            }
+        conn.close()
+        return {"ACTIVE": 0, "INACTIVE": 0, "BLOCKED": 0, "TOTAL_TRANSACTIONS": 0}
+    except:
+        if conn: conn.close()
+        return {"ACTIVE": 0, "INACTIVE": 0, "BLOCKED": 0, "TOTAL_TRANSACTIONS": 0}
 
 def executer_audit_basique(id_base):
     return True, "L'audit de base codé en dur a été retiré. Utilisez l'Audit Granulaire.", {
@@ -241,10 +275,70 @@ def executer_audit_basique(id_base):
     }
 
 def get_cpu_stats(id_base):
-    return {"busy_pct": 0, "idle_pct": 100, "history": []}
+    conn, db_type, err = get_db_connection(id_base)
+    if err or not conn: return {"busy_pct": 0, "idle_pct": 100, "history": []}
+    try:
+        cursor = conn.cursor()
+        if db_type == "ORACLE":
+            sql = """
+                SELECT 
+                    SUM(CASE WHEN STAT_NAME = 'BUSY_TIME' THEN VALUE ELSE 0 END) as BUSY,
+                    SUM(CASE WHEN STAT_NAME = 'IDLE_TIME' THEN VALUE ELSE 0 END) as IDLE
+                FROM V$OSSTAT
+                WHERE STAT_NAME IN ('BUSY_TIME', 'IDLE_TIME')
+            """
+            cursor.execute(sql)
+            row = cursor.fetchone()
+            conn.close()
+            if row and (row[0] + row[1]) > 0:
+                busy = row[0]
+                total = row[0] + row[1]
+                busy_pct = round((busy / total) * 100, 2)
+                return {"busy_pct": busy_pct, "idle_pct": 100 - busy_pct, "history": []}
+        conn.close()
+        return {"busy_pct": 0, "idle_pct": 100, "history": []}
+    except:
+        if conn: conn.close()
+        return {"busy_pct": 0, "idle_pct": 100, "history": []}
 
 def get_ram_stats(id_base):
-    return {"sga_total_mb": 0, "pga_total_mb": 0, "used_mb": 0, "max_mb": 1, "ram_pct": 0, "sga_detail": [], "pga_detail": []}
+    conn, db_type, err = get_db_connection(id_base)
+    if err or not conn: 
+        return {"sga_total_mb": 0, "pga_total_mb": 0, "used_mb": 0, "max_mb": 1, "ram_pct": 0, "sga_detail": [], "pga_detail": []}
+    try:
+        cursor = conn.cursor()
+        if db_type == "ORACLE":
+            sql = """
+                SELECT 
+                    (SELECT ROUND(SUM(BYTES)/1024/1024, 2) FROM V$SGASTAT) as SGA,
+                    (SELECT ROUND(VALUE/1024/1024, 2) FROM V$PGASTAT WHERE NAME = 'total PGA allocated') as PGA_ALLOC,
+                    (SELECT ROUND(VALUE/1024/1024, 2) FROM V$PGASTAT WHERE NAME = 'total PGA inuse') as PGA_USED
+                FROM DUAL
+            """
+            cursor.execute(sql)
+            row = cursor.fetchone()
+            conn.close()
+            if row:
+                sga = row[0] or 0
+                pga_alloc = row[1] or 0
+                pga_used = row[2] or 0
+                total = sga + pga_alloc
+                used = sga + pga_used
+                pct = round((used / total * 100), 2) if total > 0 else 0
+                return {
+                    "sga_total_mb": sga,
+                    "pga_total_mb": pga_alloc,
+                    "used_mb": used,
+                    "max_mb": total,
+                    "ram_pct": pct,
+                    "sga_detail": [],
+                    "pga_detail": []
+                }
+        conn.close()
+        return {"sga_total_mb": 0, "pga_total_mb": 0, "used_mb": 0, "max_mb": 1, "ram_pct": 0, "sga_detail": [], "pga_detail": []}
+    except:
+        if conn: conn.close()
+        return {"sga_total_mb": 0, "pga_total_mb": 0, "used_mb": 0, "max_mb": 1, "ram_pct": 0, "sga_detail": [], "pga_detail": []}
 
 def get_instance_status(id_base):
     conn, db_type, err = get_db_connection(id_base)
@@ -335,6 +429,7 @@ def get_metriques_disponibles(id_type_base):
 
 def get_all_metriques():
     conn = get_oracle_connection()
+    if not conn: return []
     try:
         cursor = conn.cursor()
         sql = """
@@ -356,6 +451,7 @@ def get_all_metriques():
         return res
     finally:
         if 'cursor' in locals(): cursor.close()
+        if conn: conn.close()
 
 def get_scripts_categorizes():
     conn = get_oracle_connection()

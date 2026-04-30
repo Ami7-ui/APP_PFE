@@ -7,12 +7,14 @@ import ReportViewer from '../components/ReportViewer';
 import useAppStore from '../store/useAppStore';
 
 const cardStyle = {
-  background: 'rgba(30, 41, 59, 0.4)',
-  backdropFilter: 'blur(10px)',
-  border: '1px solid rgba(255, 255, 255, 0.05)',
+  background: 'var(--glass-bg)',
+  backdropFilter: 'blur(24px)',
+  WebkitBackdropFilter: 'blur(24px)',
+  border: '1px solid var(--glass-border)',
   borderRadius: '16px',
   padding: '24px',
-  boxShadow: '0 4px 15px rgba(0,0,0,0.2)'
+  boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
 };
 
 const SectionTitle = ({ icon: Icon, title, color }) => (
@@ -59,15 +61,16 @@ function PipelineLoader({ currentStep }) {
                 width: 32, height: 32, borderRadius: 8,
                 background: isDone ? 'rgba(16, 185, 129, 0.15)' : isActive ? `rgba(139, 92, 246, 0.15)` : 'rgba(255,255,255,0.03)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                transition: 'all 0.3s ease'
+                transition: 'all 0.3s ease',
+                boxShadow: isActive ? '0 0 15px var(--glow-purple)' : 'none'
               }}>
                 {isDone ? <CheckCircle size={18} color="#10b981" /> : isActive ? <StepIcon size={18} color={step.color} className="animate-pulse" /> : <StepIcon size={18} color="#475569" />}
               </div>
-              <span style={{ flex: 1, fontSize: '0.9rem', color: isDone ? '#10b981' : isActive ? '#f8fafc' : '#475569', fontWeight: isActive ? 700 : 400, transition: 'all 0.3s ease' }}>
+              <span style={{ flex: 1, fontSize: '0.9rem', color: isDone ? '#10b981' : isActive ? '#f8fafc' : '#475569', fontWeight: isActive ? 700 : 400, transition: 'all 0.3s ease', textShadow: isActive ? '0 0 8px rgba(139, 92, 246, 0.5)' : 'none' }}>
                 {step.label}
               </span>
               {isDone && <span style={{ fontSize: '0.7rem', color: '#10b981', fontWeight: 700, background: 'rgba(16,185,129,0.1)', padding: '3px 10px', borderRadius: 20 }}>TERMINÉ</span>}
-              {isActive && <span style={{ fontSize: '0.7rem', color: '#a78bfa', fontWeight: 700, background: 'rgba(139,92,246,0.1)', padding: '3px 10px', borderRadius: 20, animation: 'pulse 1.5s infinite' }}>EN COURS</span>}
+              {isActive && <span style={{ fontSize: '0.7rem', color: '#a78bfa', fontWeight: 700, background: 'rgba(139,92,246,0.1)', padding: '3px 10px', borderRadius: 20, animation: 'pulseGlow 1.5s infinite' }}>EN COURS</span>}
             </div>
           );
         })}
@@ -461,12 +464,13 @@ export default function AiAssistantPage() {
             value={sqlToAnalyze}
             onChange={(e) => setSqlToAnalyze(e.target.value)}
             placeholder="Collez ici votre requête SQL Oracle à optimiser..."
+            className="hover-lift"
             style={{
               width: '100%', height: '140px', padding: '20px',
               borderRadius: '12px', marginBottom: '20px',
               fontFamily: "'Fira Code', monospace", fontSize: '0.9rem',
-              background: 'rgba(15, 23, 42, 0.6)', border: '1px solid #334155',
-              color: '#38bdf8', outline: 'none', resize: 'vertical'
+              background: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--glass-border)',
+              color: 'var(--accent-cyan)', outline: 'none', resize: 'vertical'
             }}
           />
           <div style={{ position: 'absolute', bottom: '35px', right: '15px', color: '#334155' }}>

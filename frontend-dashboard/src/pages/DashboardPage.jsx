@@ -18,7 +18,7 @@ function StatusBanner({ status }) {
   
   return (
     <div className="grid-2" style={{ marginBottom: 28 }}>
-      <GlassCard accent={c} glow={isUp} style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+      <GlassCard accent={c} glow={isUp} className="hover-lift" style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
         <div style={{ padding: 16, background: `${c}15`, borderRadius: 16, border: `1px solid ${c}30`, boxShadow: `inset 0 0 20px ${c}20`, display: 'flex' }}>
           <PlugZap size={32} color={c} style={{ filter: `drop-shadow(0 0 10px ${c})` }} />
         </div>
@@ -31,7 +31,7 @@ function StatusBanner({ status }) {
         </div>
       </GlassCard>
 
-      <GlassCard accent="#0ea5e9" style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+      <GlassCard accent="var(--accent-cyan)" className="hover-lift" style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
         <div style={{ padding: 16, background: '#0ea5e915', borderRadius: 16, border: '1px solid #0ea5e930', boxShadow: 'inset 0 0 20px #0ea5e920', display: 'flex' }}>
           <Clock size={32} color="#0ea5e9" />
         </div>
@@ -85,7 +85,7 @@ function GaugeChart({ value, label, unit, color, maxValue = 100, displayValue })
 function DynamicMetricCard({ scriptName, dataArray }) {
   if (!dataArray || dataArray.length === 0 || dataArray[0].Erreur) {
     return (
-      <GlassCard>
+      <GlassCard className="hover-lift">
         <h3 style={{ fontSize: '0.9rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>{scriptName}</h3>
         <div style={{ padding: 20, textAlign: 'center', color: '#ef4444', fontSize: '0.85rem', background: 'rgba(239, 68, 68, 0.1)', borderRadius: 8 }}>
           {dataArray?.[0]?.Erreur || "Aucune donnée"}
@@ -99,7 +99,7 @@ function DynamicMetricCard({ scriptName, dataArray }) {
   // 1. Charge globale (DB Time / CPU) -> Area/Line Chart
   if (nameLower.includes('charge globale') || nameLower.includes('db time') || nameLower.includes('cpu')) {
     return (
-      <GlassCard style={{ gridColumn: '1 / -1' }}>
+      <GlassCard className="hover-lift" style={{ gridColumn: '1 / -1' }}>
         <h3 style={{ fontSize: '0.9rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 20 }}>{scriptName}</h3>
         <div style={{ height: 300 }}>
           <ResponsiveContainer width="100%" height="100%">
@@ -113,7 +113,7 @@ function DynamicMetricCard({ scriptName, dataArray }) {
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
               <XAxis dataKey={Object.keys(dataArray[0])[0]} stroke="#94a3b8" fontSize={12} />
               <YAxis stroke="#94a3b8" fontSize={12} />
-              <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }} />
+              <Tooltip />
               <Legend />
               {Object.keys(dataArray[0]).slice(1).map((key, i) => (
                 <Area key={key} type="monotone" dataKey={key} stroke={CHART_COLORS[i % CHART_COLORS.length]} fillOpacity={1} fill={`url(#colorDbTime-${scriptName})`} />
@@ -128,7 +128,7 @@ function DynamicMetricCard({ scriptName, dataArray }) {
   // 2. IOPS Temps Réel -> Line Chart
   if (nameLower.includes('iops') || nameLower.includes('io') || nameLower.includes('temps réel')) {
     return (
-      <GlassCard style={{ gridColumn: '1 / -1' }}>
+      <GlassCard className="hover-lift" style={{ gridColumn: '1 / -1' }}>
         <h3 style={{ fontSize: '0.9rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 20 }}>{scriptName}</h3>
         <div style={{ height: 300 }}>
           <ResponsiveContainer width="100%" height="100%">
@@ -136,7 +136,7 @@ function DynamicMetricCard({ scriptName, dataArray }) {
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
               <XAxis dataKey={Object.keys(dataArray[0])[0]} stroke="#94a3b8" fontSize={12} />
               <YAxis stroke="#94a3b8" fontSize={12} />
-              <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }} />
+              <Tooltip />
               <Legend />
               {Object.keys(dataArray[0]).slice(1).map((key, i) => (
                 <Line key={key} type="monotone" dataKey={key} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2} dot={false} />
@@ -152,7 +152,7 @@ function DynamicMetricCard({ scriptName, dataArray }) {
   if (nameLower.includes('cpu actif') || nameLower.includes('inactif') || nameLower.includes('ratio')) {
     const data = dataArray.map(r => ({ name: Object.values(r)[0], value: Number(Object.values(r)[1]) }));
     return (
-      <GlassCard>
+      <GlassCard className="hover-lift">
         <h3 style={{ fontSize: '0.9rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 20 }}>{scriptName}</h3>
         <div style={{ height: 250 }}>
           <ResponsiveContainer width="100%" height="100%">
@@ -160,7 +160,7 @@ function DynamicMetricCard({ scriptName, dataArray }) {
               <Pie data={data} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
                 {data.map((entry, index) => <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />)}
               </Pie>
-              <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }} />
+              <Tooltip />
               <Legend />
             </PieChart>
           </ResponsiveContainer>
@@ -173,7 +173,7 @@ function DynamicMetricCard({ scriptName, dataArray }) {
   if (nameLower.includes('sga') || nameLower.includes('pga') || nameLower.includes('mémoire') || nameLower.includes('memory')) {
     const data = dataArray.map(r => ({ name: Object.values(r)[0], value: Number(Object.values(r)[1]) }));
     return (
-      <GlassCard>
+      <GlassCard className="hover-lift">
         <h3 style={{ fontSize: '0.9rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 20 }}>{scriptName}</h3>
         <div style={{ height: 250 }}>
           <ResponsiveContainer width="100%" height="100%">
@@ -181,7 +181,7 @@ function DynamicMetricCard({ scriptName, dataArray }) {
               <Pie data={data} cx="50%" cy="50%" outerRadius={80} dataKey="value" label={false}>
                 {data.map((entry, index) => <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />)}
               </Pie>
-              <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }} />
+              <Tooltip />
               <Legend />
             </PieChart>
           </ResponsiveContainer>
@@ -194,7 +194,7 @@ function DynamicMetricCard({ scriptName, dataArray }) {
   if (nameLower.includes('utilisateurs') || nameLower.includes('sessions')) {
     const value = dataArray[0] ? Number(Object.values(dataArray[0])[0]) : 0;
     return (
-      <GlassCard>
+      <GlassCard className="hover-lift">
         <h3 style={{ fontSize: '0.9rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 20 }}>{scriptName}</h3>
         <GaugeChart value={value} label="Valeur Actuelle" unit="" color="#10b981" maxValue={500} displayValue={value} />
       </GlassCard>
@@ -204,7 +204,7 @@ function DynamicMetricCard({ scriptName, dataArray }) {
   // 7. FIXED SCRIPT (Top SQL) -> Horizontal Bar Chart
   if (nameLower.includes('top sql') || nameLower.includes('fixed script') || nameLower.includes('sql')) {
     return (
-      <GlassCard style={{ gridColumn: '1 / -1' }}>
+      <GlassCard className="hover-lift" style={{ gridColumn: '1 / -1' }}>
         <h3 style={{ fontSize: '0.9rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 20 }}>{scriptName}</h3>
         <div style={{ height: 350 }}>
           <ResponsiveContainer width="100%" height="100%">
@@ -212,7 +212,7 @@ function DynamicMetricCard({ scriptName, dataArray }) {
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" horizontal={false} />
               <XAxis type="number" stroke="#94a3b8" fontSize={12} />
               <YAxis dataKey={Object.keys(dataArray[0])[0]} type="category" stroke="#94a3b8" fontSize={12} width={100} />
-              <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }} />
+              <Tooltip />
               <Bar dataKey={Object.keys(dataArray[0])[1]} fill="#8b5cf6" radius={[0, 4, 4, 0]} />
             </BarChart>
           </ResponsiveContainer>
@@ -223,7 +223,7 @@ function DynamicMetricCard({ scriptName, dataArray }) {
 
   // 6. État des nœuds ou default fallback -> Table
   return (
-    <GlassCard style={{ gridColumn: '1 / -1', overflowX: 'auto' }}>
+    <GlassCard className="hover-lift" style={{ gridColumn: '1 / -1', overflowX: 'auto' }}>
       <h3 style={{ fontSize: '0.9rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 20 }}>{scriptName}</h3>
       <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: '0 8px' }}>
         <thead>
@@ -274,7 +274,8 @@ export default function DashboardPage() {
       const res = await api.get(`/api/status/${selectedBase}`);
       return res.data;
     },
-    enabled: !!selectedBase
+    enabled: !!selectedBase,
+    refetchInterval: 30000 // Refresh every 30s
   });
 
   // Fetch granular audit data based on selected scripts
@@ -294,7 +295,8 @@ export default function DashboardPage() {
       const response = await api.post('/api/audit/granular', payload);
       return response.data.data;
     },
-    enabled: !!selectedBase && selectedScripts.length > 0
+    enabled: !!selectedBase && selectedScripts.length > 0,
+    refetchInterval: 60000 // Metrics refresh every 60s
   });
 
   const hasMetrics = selectedScripts.length > 0;
