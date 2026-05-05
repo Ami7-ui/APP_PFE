@@ -713,6 +713,157 @@ def get_sql_plan_details(id_base, sql_id, phv):
         return None, str(e)
 
 # ==========================================
+# 6. AUTOPSIE DE TABLE (ANALYSE DÉTAILLÉE)
+# ==========================================
+
+def get_table_autopsy(id_base, table_name):
+    conn, db_type, err = get_db_connection(id_base)
+    if err or not conn:
+        return None, err or "Inaccessible"
+    
+    if db_type != "ORACLE":
+        return None, "L'autopsie détaillée n'est disponible que pour Oracle."
+
+    results = {
+        "general": {},
+        "ram": {},
+        "indexes": [],
+        "hwm": {},
+        "histograms": [],
+        "io": []
+    }
+    
+    try:
+        cursor = conn.cursor()
+        
+        # Requête 1 : Général & Volatilité
+        q1 = """
+            SELECT 
+                t.table_name AS "NOM_TABLE",
+                t.tablespace_name AS "TABLESPACE",
+                t.partitioned AS "EST_PARTITIONNEE",
+                t.compression AS "COMPRESSION",
+                t.num_rows AS "NB_LIGNES",
+                t.blocks AS "BLOCS_UTILISES",
+                t.empty_blocks AS "BLOCS_VIDES",
+                t.avg_row_len AS "TAILLE_MOY_LIGNE_OCTETS",
+                ROUND(s.bytes / 1024 / 1024, 2) AS "TAILLE_MB",
+                TO_CHAR(t.last_analyzed, 'DD/MM/YYYY HH24:MI') AS "DERNIERE_ANALYSE",
+                NVL(tm.inserts, 0) AS "INSERTS_DEPUIS_ANALYSE",
+                NVL(tm.updates, 0) AS "UPDATES_DEPUIS_ANALYSE",
+                NVL(tm.deletes, 0) AS "DELETES_DEPUIS_ANALYSE"
+            FROM dba_tables t
+            LEFT JOIN dba_segments s ON t.table_name = s.segment_name AND t.owner = s.owner
+            LEFT JOIN dba_tab_modifications tm ON t.table_name = tm.table_name AND t.owner = tm.table_owner
+            WHERE t.table_name = UPPER(:table_name)
+            AND ROWNUM = 1
+        """
+        cursor.execute(q1, table_name=table_name)
+        row = cursor.fetchone()
+        if row:
+            columns = [col[0] for col in cursor.description]
+            results["general"] = dict(zip(columns, row))
+
+        # Requête 2 : Autopsie RAM / V$BH
+        q2 = """
+            SELECT 
+                o.object_name AS "NOM_TABLE",
+                COUNT(bh.block#) AS "BLOCS_TOTAL_EN_RAM",
+                ROUND((COUNT(bh.block#) * 8192) / 1024 / 1024, 2) AS "RAM_OCCUPEE_MB",
+                SUM(CASE WHEN bh.status = 'xcur' THEN 1 ELSE 0 END) AS "BLOCS_MODIFIES_XCUR", 
+                SUM(CASE WHEN bh.status = 'cr' THEN 1 ELSE 0 END) AS "BLOCS_LECTURE_CR", 
+                SUM(CASE WHEN bh.status = 'free' THEN 1 ELSE 0 END) AS "BLOCS_LIBRES"
+            FROM v$bh bh
+            JOIN dba_objects o ON bh.objd = o.data_object_id
+            WHERE o.object_name = UPPER(:table_name)
+            GROUP BY o.object_name
+        """
+        cursor.execute(q2, table_name=table_name)
+        row = cursor.fetchone()
+        if row:
+            columns = [col[0] for col in cursor.description]
+            results["ram"] = dict(zip(columns, row))
+
+        # Requête 3 : Index
+        q3 = """
+            SELECT 
+                i.index_name AS "NOM_INDEX",
+                i.index_type AS "TYPE_INDEX",
+                i.status AS "STATUT_INDEX",
+                LISTAGG(ic.column_name, ' + ') WITHIN GROUP (ORDER BY ic.column_position) AS "COLONNES_INDEXEES"
+            FROM dba_indexes i
+            JOIN dba_ind_columns ic ON i.index_name = ic.index_name AND i.table_owner = ic.table_owner
+            WHERE i.table_name = UPPER(:table_name)
+            GROUP BY i.index_name, i.index_type, i.status
+        """
+        cursor.execute(q3, table_name=table_name)
+        results["indexes"] = [dict(zip([col[0] for col in cursor.description], r)) for r in cursor.fetchall()]
+
+        # Requête 4 : High Water Mark / Fragmentation
+        q4 = """
+            SELECT 
+                t.table_name AS "NOM_TABLE",
+                s.blocks AS "BLOCS_ALLOUES",
+                t.blocks AS "BLOCS_UTILISES_HWM",
+                (s.blocks - t.blocks) AS "BLOCS_GASPILLES",
+                ROUND(((s.blocks - t.blocks) / NULLIF(s.blocks, 0)) * 100, 2) AS "POURCENTAGE_GASPILLAGE",
+                ROUND((s.blocks * 8192) / 1024 / 1024, 2) AS "TAILLE_ALLOUEE_MB",
+                ROUND((t.blocks * 8192) / 1024 / 1024, 2) AS "TAILLE_REELLE_MB"
+            FROM dba_tables t
+            JOIN dba_segments s ON t.table_name = s.segment_name AND t.owner = s.owner
+            WHERE t.table_name = UPPER(:table_name)
+            AND ROWNUM = 1
+        """
+        cursor.execute(q4, table_name=table_name)
+        row = cursor.fetchone()
+        if row:
+            columns = [col[0] for col in cursor.description]
+            results["hwm"] = dict(zip(columns, row))
+
+        # Requête 5 : Histogrammes / Profilage
+        q5 = """
+            SELECT 
+                column_name AS "COLONNE",
+                num_distinct AS "VALEURS_DISTINCTES",
+                num_nulls AS "VALEURS_NULLES",
+                histogram AS "TYPE_HISTOGRAMME",
+                TO_CHAR(last_analyzed, 'DD/MM/YYYY HH24:MI') AS "DERNIERE_ANALYSE"
+            FROM dba_tab_col_statistics
+            WHERE table_name = UPPER(:table_name)
+            ORDER BY num_distinct DESC
+        """
+        cursor.execute(q5, table_name=table_name)
+        results["histograms"] = [dict(zip([col[0] for col in cursor.description], r)) for r in cursor.fetchall()]
+
+        # Requête 6 : I/O Physiques & Contention
+        q6 = """
+            SELECT 
+                object_name AS "NOM_TABLE",
+                statistic_name AS "TYPE_ACTIVITE",
+                value AS "COMPTEUR"
+            FROM v$segment_statistics
+            WHERE object_name = UPPER(:table_name)
+              AND value > 0
+              AND statistic_name IN (
+                  'logical reads',      
+                  'physical reads',     
+                  'physical writes',     
+                  'buffer busy waits',   
+                  'row lock waits',      
+                  'ITL waits'            
+              )
+            ORDER BY value DESC
+        """
+        cursor.execute(q6, table_name=table_name)
+        results["io"] = [dict(zip([col[0] for col in cursor.description], r)) for r in cursor.fetchall()]
+
+        conn.close()
+        return results, None
+    except Exception as e:
+        if conn: conn.close()
+        return None, str(e)
+
+# ==========================================
 # 7. HISTORIQUE DES RAPPORTS PDF
 # ==========================================
 

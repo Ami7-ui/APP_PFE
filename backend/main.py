@@ -240,6 +240,13 @@ async def sql_plan_details(id_base: int, sql_id: str, phv: str):
     if err: raise HTTPException(status_code=400, detail=f"Erreur DB: {err}")
     return {"data": data}
 
+@app.get("/api/tables/{id_base}/{table_name}/stats")
+async def get_table_stats(id_base: int, table_name: str):
+    """ Récupère l'autopsie complète d'une table Oracle """
+    data, err = db_functions.get_table_autopsy(id_base, table_name)
+    if err: raise HTTPException(status_code=400, detail=f"Erreur DB: {err}")
+    return {"data": data}
+
 @app.get("/api/diagnostics/scripts")
 def get_diagnostics_scripts():
     return db_functions.get_scripts_categorizes()

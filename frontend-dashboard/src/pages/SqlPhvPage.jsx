@@ -3,6 +3,7 @@ import api from '../api';
 import GlassCard from '../components/GlassCard';
 import { Activity, Database, LayoutList, ChevronRight, ChevronDown, X, AlertCircle, Loader2, GitBranch, Code, Bot, Search } from 'lucide-react';
 import AiResponseViewer from '../components/AiResponseViewer';
+import TableAutopsyDrawer from '../components/TableAutopsyDrawer';
 
 export default function SqlPhvPage() {
   const [bases, setBases] = useState([]);
@@ -20,6 +21,9 @@ export default function SqlPhvPage() {
 
   const [aiAnalysisResult, setAiAnalysisResult] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  const [isAutopsyOpen, setIsAutopsyOpen] = useState(false);
+  const [autopsyTable, setAutopsyTable] = useState('');
 
   const [error, setError] = useState('');
 
@@ -450,7 +454,22 @@ export default function SqlPhvPage() {
                                 {depth > 0 && <span style={{ color: 'rgba(255,255,255,0.15)' }}>└─</span>}
                                 {opLabel}
                               </td>
-                              <td style={{ padding: '8px 16px', color: '#38bdf8', fontWeight: 600 }}>{objName || '-'}</td>
+                              <td style={{ padding: '8px 16px', color: '#38bdf8', fontWeight: 600 }}>
+                                {objName ? (
+                                  <span 
+                                    onClick={() => { 
+                                      setAutopsyTable(objName); 
+                                      setIsAutopsyOpen(true); 
+                                    }}
+                                    style={{ cursor: 'pointer', borderBottom: '1px dashed rgba(56, 189, 248, 0.5)', transition: 'all 0.2s' }}
+                                    title="Cliquez pour autopsier cet objet"
+                                    onMouseEnter={e => { e.currentTarget.style.color = '#7dd3fc'; e.currentTarget.style.borderBottomColor = '#7dd3fc'; }}
+                                    onMouseLeave={e => { e.currentTarget.style.color = '#38bdf8'; e.currentTarget.style.borderBottomColor = 'rgba(56, 189, 248, 0.5)'; }}
+                                  >
+                                    {objName}
+                                  </span>
+                                ) : '-'}
+                              </td>
                               <td style={{ padding: '8px 16px', textAlign: 'right', color: '#cbd5e1' }}>{cost || '-'}</td>
                               <td style={{ padding: '8px 16px', textAlign: 'right', color: '#cbd5e1' }}>{card || '-'}</td>
                               <td style={{ padding: '8px 16px', textAlign: 'right', color: '#cbd5e1' }}>{bytes || '-'}</td>
@@ -506,6 +525,15 @@ export default function SqlPhvPage() {
         </div>
 
       </div>
+
+      {/* Drawer pour l'autopsie de table */}
+      <TableAutopsyDrawer 
+        isOpen={isAutopsyOpen} 
+        onClose={() => setIsAutopsyOpen(false)} 
+        tableName={autopsyTable} 
+        idBase={selectedBase} 
+      />
+
     </div>
   );
 }
