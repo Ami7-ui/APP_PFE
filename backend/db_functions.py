@@ -739,24 +739,41 @@ def get_table_autopsy(id_base, table_name):
         # Requête 1 : Général & Volatilité
         q1 = """
             SELECT 
-                t.table_name AS "NOM_TABLE",
-                t.tablespace_name AS "TABLESPACE",
-                t.partitioned AS "EST_PARTITIONNEE",
-                t.compression AS "COMPRESSION",
-                t.num_rows AS "NB_LIGNES",
-                t.blocks AS "BLOCS_UTILISES",
-                t.empty_blocks AS "BLOCS_VIDES",
-                t.avg_row_len AS "TAILLE_MOY_LIGNE_OCTETS",
-                ROUND(s.bytes / 1024 / 1024, 2) AS "TAILLE_MB",
-                TO_CHAR(t.last_analyzed, 'DD/MM/YYYY HH24:MI') AS "DERNIERE_ANALYSE",
-                NVL(tm.inserts, 0) AS "INSERTS_DEPUIS_ANALYSE",
-                NVL(tm.updates, 0) AS "UPDATES_DEPUIS_ANALYSE",
-                NVL(tm.deletes, 0) AS "DELETES_DEPUIS_ANALYSE"
-            FROM dba_tables t
-            LEFT JOIN dba_segments s ON t.table_name = s.segment_name AND t.owner = s.owner
-            LEFT JOIN dba_tab_modifications tm ON t.table_name = tm.table_name AND t.owner = tm.table_owner
-            WHERE t.table_name = UPPER(:table_name)
-            AND ROWNUM = 1
+    t.table_name AS "NOM_TABLE",
+    t.tablespace_name AS "TABLESPACE",
+    (SELECT COUNT(*) FROM dba_tab_columns c WHERE c.table_name = t.table_name AND c.owner = t.owner) AS "NB_COLONNES", -- Ajout : Nombre de colonnes
+    ROUND(
+        CASE 
+            WHEN stat.log_reads > 0 THEN ((stat.log_reads - stat.phys_reads) / stat.log_reads) * 100 
+            ELSE NULL 
+        END, 2
+    ) AS "HIT_RATIO_POURCENT", -- Ajout : Hit Ratio de la table
+    t.partitioned AS "EST_PARTITIONNEE",
+    t.compression AS "COMPRESSION",
+    t.num_rows AS "NB_LIGNES",
+    t.blocks AS "BLOCS_UTILISES",
+    t.empty_blocks AS "BLOCS_VIDES", -- Utile pour détecter la fragmentation
+    t.avg_row_len AS "TAILLE_MOY_LIGNE_OCTETS", -- Utile pour le dimensionnement
+    ROUND(s.bytes / 1024 / 1024, 2) AS "TAILLE_MB",
+    TO_CHAR(t.last_analyzed, 'DD/MM/YYYY HH24:MI') AS "DERNIERE_ANALYSE",
+    NVL(tm.inserts, 0) AS "INSERTS_DEPUIS_ANALYSE", -- La table est-elle très volatile ?
+    NVL(tm.updates, 0) AS "UPDATES_DEPUIS_ANALYSE",
+    NVL(tm.deletes, 0) AS "DELETES_DEPUIS_ANALYSE"
+FROM dba_tables t
+LEFT JOIN dba_segments s ON t.table_name = s.segment_name AND t.owner = s.owner
+LEFT JOIN dba_tab_modifications tm ON t.table_name = tm.table_name AND t.owner = tm.table_owner
+LEFT JOIN (
+        SELECT 
+        object_name, 
+        owner,
+        SUM(CASE WHEN statistic_name = 'logical reads' THEN value ELSE 0 END) AS log_reads,
+        SUM(CASE WHEN statistic_name = 'physical reads' THEN value ELSE 0 END) AS phys_reads
+    FROM v$segment_statistics
+    WHERE object_name = UPPER(:table_name)
+    GROUP BY object_name, owner
+) stat ON t.table_name = stat.object_name AND t.owner = stat.owner
+WHERE t.table_name = UPPER(:table_name)
+
         """
         cursor.execute(q1, table_name=table_name)
         row = cursor.fetchone()
@@ -767,16 +784,40 @@ def get_table_autopsy(id_base, table_name):
         # Requête 2 : Autopsie RAM / V$BH
         q2 = """
             SELECT 
-                o.object_name AS "NOM_TABLE",
-                COUNT(bh.block#) AS "BLOCS_TOTAL_EN_RAM",
-                ROUND((COUNT(bh.block#) * 8192) / 1024 / 1024, 2) AS "RAM_OCCUPEE_MB",
-                SUM(CASE WHEN bh.status = 'xcur' THEN 1 ELSE 0 END) AS "BLOCS_MODIFIES_XCUR", 
-                SUM(CASE WHEN bh.status = 'cr' THEN 1 ELSE 0 END) AS "BLOCS_LECTURE_CR", 
-                SUM(CASE WHEN bh.status = 'free' THEN 1 ELSE 0 END) AS "BLOCS_LIBRES"
-            FROM v$bh bh
-            JOIN dba_objects o ON bh.objd = o.data_object_id
-            WHERE o.object_name = UPPER(:table_name)
-            GROUP BY o.object_name
+    o.owner,
+    o.object_name AS nom_table,
+    o.object_type,
+    
+    COUNT(*) AS blocs_total_en_ram,
+    
+    -- Utilisation de TO_NUMBER pour s'assurer que la multiplication fonctionne
+    -- et remplacement du calcul manuel par la valeur récupérée
+    ROUND(COUNT(*) * TO_NUMBER(bs.value) / 1024 / 1024, 2) AS ram_occupee_mb,
+    
+    SUM(CASE WHEN bh.status = 'xcur' THEN 1 ELSE 0 END) AS blocs_modifies_xcur,
+    SUM(CASE WHEN bh.status = 'cr' THEN 1 ELSE 0 END) AS blocs_lecture_cr,
+    SUM(CASE WHEN bh.status = 'free' THEN 1 ELSE 0 END) AS blocs_libres,
+    
+    -- Sécurisation avec NULLIF pour éviter l'erreur ORA-01476 (division par zéro)
+    ROUND(SUM(CASE WHEN bh.status = 'xcur' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) * 100, 2) AS pct_modifies,
+    ROUND(SUM(CASE WHEN bh.status = 'cr' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) * 100, 2) AS pct_lecture
+
+FROM v$bh bh
+JOIN dba_objects o 
+    ON bh.objd = o.data_object_id
+JOIN v$parameter bs 
+    ON bs.name = 'db_block_size'
+
+WHERE o.object_name = UPPER(:table_name)
+-- Filtre owner supprimé comme demandé
+
+GROUP BY 
+    o.owner,
+    o.object_name,
+    o.object_type,
+    bs.value
+
+ORDER BY ram_occupee_mb DESC
         """
         cursor.execute(q2, table_name=table_name)
         row = cursor.fetchone()
@@ -786,15 +827,44 @@ def get_table_autopsy(id_base, table_name):
 
         # Requête 3 : Index
         q3 = """
-            SELECT 
-                i.index_name AS "NOM_INDEX",
-                i.index_type AS "TYPE_INDEX",
-                i.status AS "STATUT_INDEX",
-                LISTAGG(ic.column_name, ' + ') WITHIN GROUP (ORDER BY ic.column_position) AS "COLONNES_INDEXEES"
-            FROM dba_indexes i
-            JOIN dba_ind_columns ic ON i.index_name = ic.index_name AND i.table_owner = ic.table_owner
-            WHERE i.table_name = UPPER(:table_name)
-            GROUP BY i.index_name, i.index_type, i.status
+           SELECT 
+    i.owner,
+    i.index_name AS nom_index,
+    i.index_type AS type_index,
+    i.uniqueness,
+    i.status AS statut_index,
+    i.tablespace_name,
+
+    LISTAGG(ic.column_name, ' + ' ON OVERFLOW TRUNCATE '...')
+        WITHIN GROUP (ORDER BY ic.column_position) AS colonnes_indexees,
+
+    COUNT(*) AS nb_colonnes,
+
+    i.blevel,
+    i.leaf_blocks,
+    i.distinct_keys
+
+FROM dba_indexes i
+
+JOIN dba_ind_columns ic 
+    ON i.index_name = ic.index_name
+   AND i.owner = ic.index_owner
+   AND i.table_name = ic.table_name   
+
+WHERE i.table_name = UPPER(:table_name)
+
+GROUP BY 
+    i.owner,
+    i.index_name,
+    i.index_type,
+    i.uniqueness,
+    i.status,
+    i.tablespace_name,
+    i.blevel,
+    i.leaf_blocks,
+    i.distinct_keys
+
+ORDER BY i.owner, i.index_name
         """
         cursor.execute(q3, table_name=table_name)
         results["indexes"] = [dict(zip([col[0] for col in cursor.description], r)) for r in cursor.fetchall()]
@@ -838,21 +908,30 @@ def get_table_autopsy(id_base, table_name):
         # Requête 6 : I/O Physiques & Contention
         q6 = """
             SELECT 
-                object_name AS "NOM_TABLE",
-                statistic_name AS "TYPE_ACTIVITE",
-                value AS "COMPTEUR"
-            FROM v$segment_statistics
-            WHERE object_name = UPPER(:table_name)
-              AND value > 0
-              AND statistic_name IN (
-                  'logical reads',      
-                  'physical reads',     
-                  'physical writes',     
-                  'buffer busy waits',   
-                  'row lock waits',      
-                  'ITL waits'            
-              )
-            ORDER BY value DESC
+    v.owner,
+    v.object_name AS nom_table,
+    v.statistic_name AS type_activite,
+    SUM(v.value) AS compteur
+
+FROM v$segment_statistics v
+
+WHERE v.object_name = UPPER(:table_name)
+  AND v.value > 0
+  AND v.statistic_name IN (
+        'logical reads',
+        'physical reads',
+        'physical writes',
+        'buffer busy waits',
+        'row lock waits',
+        'ITL waits'
+  )
+
+GROUP BY 
+    v.owner,
+    v.object_name,
+    v.statistic_name
+
+ORDER BY compteur DESC
         """
         cursor.execute(q6, table_name=table_name)
         results["io"] = [dict(zip([col[0] for col in cursor.description], r)) for r in cursor.fetchall()]

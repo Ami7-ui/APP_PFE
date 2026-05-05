@@ -165,6 +165,8 @@ const GeneralTab = ({ data }) => {
       <MetricCard label="Taille Moyenne Ligne" value={`${data.TAILLE_MOY_LIGNE_OCTETS} octets`} />
       <MetricCard label="Taille Totale" value={`${data.TAILLE_MB} MB`} highlight="#a78bfa" />
       <MetricCard label="Dernière Analyse" value={data.DERNIERE_ANALYSE} />
+      <MetricCard label="Nombre de Colonnes" value={data.NB_COLONNES} />
+      <MetricCard label="Hit Ratio (Buffer Cache)" value={data.HIT_RATIO_POURCENT ? `${data.HIT_RATIO_POURCENT}%` : 'N/A'} highlight={data.HIT_RATIO_POURCENT < 90 ? '#fbbf24' : '#4ade80'} />
       
       <div style={{ gridColumn: '1 / -1', background: 'rgba(15, 23, 42, 0.4)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)', marginTop: '8px' }}>
         <h4 style={{ margin: '0 0 12px 0', color: '#e2e8f0', fontSize: '1rem' }}>Volatilité depuis la dernière analyse</h4>
@@ -191,14 +193,38 @@ const RamTab = ({ data }) => {
   if (!data || Object.keys(data).length === 0) return <NoData />;
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px' }}>
+      <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '8px', marginBottom: '8px' }}>
+        <span style={{ background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', padding: '2px 8px', borderRadius: '4px', fontSize: '0.8rem', border: '1px solid rgba(56, 189, 248, 0.2)' }}>Propriétaire : {data.OWNER}</span>
+        <span style={{ background: 'rgba(167, 139, 250, 0.1)', color: '#a78bfa', padding: '2px 8px', borderRadius: '4px', fontSize: '0.8rem', border: '1px solid rgba(167, 139, 250, 0.2)' }}>Type : {data.OBJECT_TYPE}</span>
+      </div>
+      
       <MetricCard label="RAM Occupée" value={`${data.RAM_OCCUPEE_MB} MB`} highlight="#38bdf8" />
       <MetricCard label="Blocs Total en RAM" value={data.BLOCS_TOTAL_EN_RAM?.toLocaleString()} />
-      <MetricCard label="Blocs Modifiés (XCUR)" value={data.BLOCS_MODIFIES_XCUR?.toLocaleString()} highlight={data.BLOCS_MODIFIES_XCUR > 0 ? '#fbbf24' : null} />
-      <MetricCard label="Blocs Lecture (CR)" value={data.BLOCS_LECTURE_CR?.toLocaleString()} />
+      
+      <div style={{ background: 'rgba(15, 23, 42, 0.4)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+        <div style={{ color: '#94a3b8', fontSize: '0.85rem', marginBottom: '12px' }}>Distribution de l'état des blocs</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <ProgressBar label="Lecture (CR)" value={data.PCT_LECTURE} color="#38bdf8" count={data.BLOCS_LECTURE_CR} />
+          <ProgressBar label="Modifiés (XCUR)" value={data.PCT_MODIFIES} color="#fbbf24" count={data.BLOCS_MODIFIES_XCUR} />
+        </div>
+      </div>
+
       <MetricCard label="Blocs Libres" value={data.BLOCS_LIBRES?.toLocaleString()} />
     </div>
   );
 };
+
+const ProgressBar = ({ label, value, color, count }) => (
+  <div>
+    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '4px' }}>
+      <span style={{ color: '#e2e8f0' }}>{label}</span>
+      <span style={{ color: color, fontWeight: 600 }}>{value}% ({count?.toLocaleString()})</span>
+    </div>
+    <div style={{ height: '6px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', overflow: 'hidden' }}>
+      <div style={{ height: '100%', width: `${value}%`, background: color, borderRadius: '3px', transition: 'width 0.5s ease-out' }} />
+    </div>
+  </div>
+);
 
 const IndexesTab = ({ data }) => {
   if (!data || data.length === 0) return <NoData message="Aucun index trouvé pour cette table." />;
@@ -216,7 +242,13 @@ const IndexesTab = ({ data }) => {
               {idx.STATUT_INDEX}
             </span>
           </div>
-          <div style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '8px' }}>Type : <span style={{ color: '#cbd5e1' }}>{idx.TYPE_INDEX}</span></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '0.85rem', color: '#94a3b8', marginBottom: '8px' }}>
+            <div>Type : <span style={{ color: '#cbd5e1' }}>{idx.TYPE_INDEX}</span></div>
+            <div>Unicité : <span style={{ color: idx.UNIQUENESS === 'UNIQUE' ? '#4ade80' : '#cbd5e1' }}>{idx.UNIQUENESS}</span></div>
+            <div>B-Level : <span style={{ color: idx.BLEVEL > 3 ? '#ef4444' : '#cbd5e1' }}>{idx.BLEVEL}</span></div>
+            <div>Leaf Blocks : <span style={{ color: '#cbd5e1' }}>{idx.LEAF_BLOCKS?.toLocaleString()}</span></div>
+            <div>Distinct Keys : <span style={{ color: '#38bdf8' }}>{idx.DISTINCT_KEYS?.toLocaleString()}</span></div>
+          </div>
           <div style={{ color: '#38bdf8', fontSize: '0.9rem', fontFamily: 'monospace', background: 'rgba(56, 189, 248, 0.05)', padding: '8px', borderRadius: '6px' }}>
             {idx.COLONNES_INDEXEES}
           </div>
@@ -290,7 +322,10 @@ const IoTab = ({ data }) => {
 
         return (
           <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(15, 23, 42, 0.4)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
-            <span style={{ color: '#e2e8f0', fontSize: '1rem' }}>{row.TYPE_ACTIVITE}</span>
+            <div>
+              <div style={{ color: '#e2e8f0', fontSize: '1rem' }}>{row.TYPE_ACTIVITE}</div>
+              <div style={{ color: '#64748b', fontSize: '0.75rem', marginTop: '4px' }}>Owner : {row.OWNER}</div>
+            </div>
             <span style={{ color: color, fontWeight: 700, fontSize: '1.2rem', fontFamily: 'monospace' }}>{row.COMPTEUR?.toLocaleString()}</span>
           </div>
         );
