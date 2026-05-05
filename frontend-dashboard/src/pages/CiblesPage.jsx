@@ -115,13 +115,17 @@ export default function CiblesPage() {
             <div className="form-grid-2">
               <div className="form-group">
                 <label className="form-label">Type SGBD</label>
-                <input 
-                  type="text" 
+                <select 
                   value={form.Type_SGBD} 
                   onChange={e=>setForm({...form,Type_SGBD:e.target.value})} 
-                  placeholder="Oracle, PostgreSQL, etc."
                   required
-                />
+                  style={{ cursor: 'pointer' }}
+                >
+                  <option value="" disabled>Sélectionnez le type SGBD...</option>
+                  <option value="Oracle">Oracle</option>
+                  <option value="MySQL">MySQL</option>
+                  <option value="PostgreSQL">PostgreSQL</option>
+                </select>
               </div>
             </div>
             <div className="divider"></div>

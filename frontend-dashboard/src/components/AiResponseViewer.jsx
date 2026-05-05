@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Terminal, Copy, Check, Hash, Info, List } from 'lucide-react';
 
 /**
@@ -12,6 +13,7 @@ const AiResponseViewer = ({ content }) => {
   return (
     <div className="markdown-container" style={{ color: '#cbd5e1', fontSize: '0.95rem' }}>
       <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
         components={{
           code({ node, inline, className, children, ...props }) {
             const match = /language-(\w+)/.exec(className || '');
@@ -111,12 +113,35 @@ const AiResponseViewer = ({ content }) => {
             </blockquote>
           ),
           table: ({ children }) => (
-            <div style={{ overflowX: 'auto', margin: '20px 0', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>{children}</table>
+            <div className="glass-panel" style={{ overflowX: 'auto', margin: '24px 0', padding: '2px' }}>
+              <table className="og-table" style={{ margin: 0 }}>{children}</table>
             </div>
           ),
-          th: ({ children }) => <th style={{ background: 'rgba(30, 41, 59, 0.8)', padding: '12px 16px', textAlign: 'left', fontWeight: 700, color: '#f8fafc', borderBottom: '2px solid rgba(255,255,255,0.1)' }}>{children}</th>,
-          td: ({ children }) => <td style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>{children}</td>,
+          thead: ({ children }) => <thead style={{ background: 'rgba(15, 23, 42, 0.6)' }}>{children}</thead>,
+          th: ({ children }) => (
+            <th style={{ 
+              padding: '14px 20px', 
+              textAlign: 'left', 
+              fontSize: '0.75rem', 
+              textTransform: 'uppercase', 
+              letterSpacing: '0.1em', 
+              color: '#38bdf8',
+              borderBottom: '1px solid rgba(56, 189, 248, 0.2)'
+            }}>
+              {children}
+            </th>
+          ),
+          td: ({ children }) => (
+            <td style={{ 
+              padding: '14px 20px', 
+              fontSize: '0.88rem', 
+              color: '#e2e8f0', 
+              borderBottom: '1px solid rgba(255, 255, 255, 0.05)' 
+            }}>
+              {children}
+            </td>
+          ),
+          tr: ({ children }) => <tr style={{ transition: 'all 0.2s' }}>{children}</tr>,
         }}
       >
         {content}

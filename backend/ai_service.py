@@ -267,6 +267,8 @@ def analyze_phv_plans(query: str, plans: list) -> str:
     system_prompt = """Tu es un expert DBA Oracle Senior. On te fournit une liste de plusieurs plans d'exécution (PHVs) pour un unique SQL_ID. 
 Ton objectif est de réaliser une étude comparative pour déterminer quelle stratégie d'exécution est la plus efficace.
 
+RÈGLE DE FORMATAGE OBLIGATOIRE : Lorsque tu génères un tableau comparatif, tu DOIS utiliser la syntaxe Markdown standard ET insérer un véritable retour à la ligne (\\n) après chaque ligne du tableau, y compris après la ligne de séparation (---). Ne génère JAMAIS un tableau sur une seule ligne continue.
+
 Structure ta réponse ainsi :
 ### 📊 Tableau Comparatif Synthétique
 (Crée un petit tableau Markdown comparant les PHVs sur le Coût total, les Lectures Disque et le type de Jointure dominante).
