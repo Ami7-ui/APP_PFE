@@ -247,6 +247,23 @@ async def get_table_stats(id_base: int, table_name: str):
     if err: raise HTTPException(status_code=400, detail=f"Erreur DB: {err}")
     return {"data": data}
 
+
+@app.get("/api/indexes/{id_base}/{index_name}/analysis")
+async def get_index_analysis(id_base: int, index_name: str):
+    """ Récupère l'analyse complète d'un index Oracle (5 scripts) """
+    data, err = db_functions.get_index_analysis(id_base, index_name)
+    if err: raise HTTPException(status_code=400, detail=f"Erreur DB: {err}")
+    return {"data": data}
+
+@app.post("/api/indexes/{id_base}/{owner}/{index_name}/validate")
+async def validate_index(id_base: int, owner: str, index_name: str):
+    """ Déclenche ANALYZE INDEX ... VALIDATE STRUCTURE et retourne les stats de fragmentation """
+    data, err = db_functions.validate_index_structure(id_base, owner, index_name)
+    if err: raise HTTPException(status_code=400, detail=err)
+    return {"data": data}
+
+
+
 @app.get("/api/diagnostics/scripts")
 def get_diagnostics_scripts():
     return db_functions.get_scripts_categorizes()

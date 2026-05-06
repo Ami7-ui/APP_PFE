@@ -4,6 +4,8 @@ import GlassCard from '../components/GlassCard';
 import { Activity, Database, LayoutList, ChevronRight, ChevronDown, X, AlertCircle, Loader2, GitBranch, Code, Bot, Search } from 'lucide-react';
 import AiResponseViewer from '../components/AiResponseViewer';
 import TableAutopsyDrawer from '../components/TableAutopsyDrawer';
+import IndexAnalysisDrawer from '../components/IndexAnalysisDrawer';
+
 
 export default function SqlPhvPage() {
   const [bases, setBases] = useState([]);
@@ -24,6 +26,10 @@ export default function SqlPhvPage() {
 
   const [isAutopsyOpen, setIsAutopsyOpen] = useState(false);
   const [autopsyTable, setAutopsyTable] = useState('');
+
+  const [isIndexAutopsyOpen, setIsIndexAutopsyOpen] = useState(false);
+  const [autopsyIndex, setAutopsyIndex] = useState('');
+
 
   const [error, setError] = useState('');
 
@@ -458,8 +464,14 @@ export default function SqlPhvPage() {
                                 {objName ? (
                                   <span 
                                     onClick={() => { 
-                                      setAutopsyTable(objName); 
-                                      setIsAutopsyOpen(true); 
+                                      const objType = node.OBJECT_TYPE || node.object_type || '';
+                                      if (objType.toUpperCase().includes('INDEX')) {
+                                        setAutopsyIndex(objName);
+                                        setIsIndexAutopsyOpen(true);
+                                      } else {
+                                        setAutopsyTable(objName); 
+                                        setIsAutopsyOpen(true); 
+                                      }
                                     }}
                                     style={{ cursor: 'pointer', borderBottom: '1px dashed rgba(56, 189, 248, 0.5)', transition: 'all 0.2s' }}
                                     title="Cliquez pour autopsier cet objet"
@@ -470,6 +482,7 @@ export default function SqlPhvPage() {
                                   </span>
                                 ) : '-'}
                               </td>
+
                               <td style={{ padding: '8px 16px', textAlign: 'right', color: '#cbd5e1' }}>{cost || '-'}</td>
                               <td style={{ padding: '8px 16px', textAlign: 'right', color: '#cbd5e1' }}>{card || '-'}</td>
                               <td style={{ padding: '8px 16px', textAlign: 'right', color: '#cbd5e1' }}>{bytes || '-'}</td>
@@ -533,6 +546,15 @@ export default function SqlPhvPage() {
         tableName={autopsyTable} 
         idBase={selectedBase} 
       />
+
+      {/* Drawer pour l'autopsie d'index */}
+      <IndexAnalysisDrawer
+        isOpen={isIndexAutopsyOpen}
+        onClose={() => setIsIndexAutopsyOpen(false)}
+        indexName={autopsyIndex}
+        idBase={selectedBase}
+      />
+
 
     </div>
   );

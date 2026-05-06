@@ -1568,3 +1568,208 @@ def get_last_audit_data(id_base):
         return None
     finally:
         if 'conn' in locals() and conn: conn.close()
+
+# ==========================================
+# 7. ANALYSE DES INDEX (NOUVELLE FONCTIONNALITÉ)
+# ==========================================
+
+def get_index_analysis(id_base, index_name):
+    conn, db_type, err = get_db_connection(id_base)
+    if err or not conn:
+        return None, err or "Inaccessible"
+    
+    if db_type != "ORACLE":
+        return None, "L'analyse détaillée des index n'est disponible que pour Oracle."
+
+    results = {
+        "structure": {},
+        "ram": {},
+        "io": [],
+        "usage": {},
+        "fragmentation": {}
+    }
+    
+    try:
+        cursor = conn.cursor()
+        
+        # 1. Structure et Colonnes
+        q1 = """
+            SELECT i.owner, i.index_name AS nom_index, i.index_type AS type_index, i.uniqueness, 
+                   i.status AS statut, i.blevel AS hauteur_arbre, i.leaf_blocks AS blocs_feuilles, 
+                   i.distinct_keys AS valeurs_distinctes, i.clustering_factor AS facteur_clustering, 
+                   TO_CHAR(i.last_analyzed, 'DD/MM/YYYY HH24:MI') AS derniere_analyse, 
+                   LISTAGG(ic.column_name, ' + ' ON OVERFLOW TRUNCATE '...') WITHIN GROUP (ORDER BY ic.column_position) AS colonnes_indexees 
+            FROM dba_indexes i 
+            JOIN dba_ind_columns ic ON i.index_name = ic.index_name AND i.owner = ic.index_owner 
+            WHERE i.index_name = UPPER(:index_name) 
+            GROUP BY i.owner, i.index_name, i.index_type, i.uniqueness, i.status, i.blevel, 
+                     i.leaf_blocks, i.distinct_keys, i.clustering_factor, i.last_analyzed
+        """
+        cursor.execute(q1, index_name=index_name)
+        row = cursor.fetchone()
+        if row:
+            cols = [col[0] for col in cursor.description]
+            results["structure"] = dict(zip(cols, row))
+
+        # 2. Empreinte en RAM (Buffer Cache)
+        q2 = """
+            SELECT o.owner, o.object_name AS nom_index, COUNT(*) AS blocs_total_en_ram, 
+                   ROUND(COUNT(*) * TO_NUMBER(bs.value) / 1024 / 1024, 2) AS ram_occupee_mb, 
+                   SUM(CASE WHEN bh.status = 'xcur' THEN 1 ELSE 0 END) AS blocs_modifies_xcur, 
+                   SUM(CASE WHEN bh.status = 'cr' THEN 1 ELSE 0 END) AS blocs_lecture_cr, 
+                   ROUND(SUM(CASE WHEN bh.status = 'xcur' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) * 100, 2) AS pct_modifies 
+            FROM v$bh bh 
+            JOIN dba_objects o ON bh.objd = o.data_object_id 
+            JOIN v$parameter bs ON bs.name = 'db_block_size' 
+            WHERE o.object_name = UPPER(:index_name) AND o.object_type = 'INDEX' 
+            GROUP BY o.owner, o.object_name, bs.value
+        """
+        cursor.execute(q2, index_name=index_name)
+        row = cursor.fetchone()
+        if row:
+            cols = [col[0] for col in cursor.description]
+            results["ram"] = dict(zip(cols, row))
+
+        # 3. Activité I/O et Contention Physique
+        q3 = """
+            SELECT object_name AS nom_index, statistic_name AS type_activite, value AS compteur 
+            FROM v$segment_statistics 
+            WHERE object_name = UPPER(:index_name) AND object_type = 'INDEX' AND value > 0 
+            AND statistic_name IN ('logical reads', 'physical reads', 'segment scans', 'buffer busy waits', 'row lock waits') 
+            ORDER BY value DESC
+        """
+        cursor.execute(q3, index_name=index_name)
+        cols = [col[0] for col in cursor.description]
+        results["io"] = [dict(zip(cols, r)) for r in cursor.fetchall()]
+
+        # 4. Détection des Index "Poids Morts" (Usage réel)
+        q4 = """
+            SELECT i.owner, i.index_name AS "NOM_INDEX", i.table_name AS "TABLE_ASSOCIEE", 
+                   i.uniqueness AS "TYPE_INDEX", i.index_type AS "TYPE_STRUCTURE", 
+                   ROUND(s.bytes / 1024 / 1024, 2) AS "TAILLE_MB", 
+                   NVL(u.total_access_count, 0) AS "NB_UTILISATIONS", 
+                   NVL(u.total_exec_count, 0) AS "NB_EXECUTIONS", 
+                   TO_CHAR(u.last_used, 'DD/MM/YYYY HH24:MI') AS "DERNIERE_UTILISATION", 
+                   NVL(sp.nb_usage_sql, 0) AS "UTILISATION_SQL", 
+                   CASE 
+                     WHEN i.uniqueness = 'UNIQUE' THEN 'CRITIQUE (PK/UK)' 
+                     WHEN NVL(u.total_access_count,0) = 0 AND NVL(sp.nb_usage_sql,0) = 0 THEN 'POINT MORT' 
+                     WHEN NVL(u.total_access_count,0) < 10 AND NVL(sp.nb_usage_sql,0) < 10 THEN 'FAIBLE UTILISATION' 
+                     ELSE 'ACTIF' 
+                   END AS "STATUT_USAGE" 
+            FROM dba_indexes i 
+            LEFT JOIN dba_segments s ON i.owner = s.owner AND i.index_name = s.segment_name 
+            LEFT JOIN dba_index_usage u ON i.index_name = u.name AND i.owner = u.owner 
+            LEFT JOIN (
+                SELECT object_owner, object_name, COUNT(*) AS nb_usage_sql 
+                FROM v$sql_plan 
+                WHERE object_type = 'INDEX' 
+                GROUP BY object_owner, object_name
+            ) sp ON sp.object_name = i.index_name AND sp.object_owner = i.owner 
+            WHERE i.index_name = UPPER(:index_name)
+        """
+        cursor.execute(q4, index_name=index_name)
+        row = cursor.fetchone()
+        if row:
+            cols = [col[0] for col in cursor.description]
+            results["usage"] = dict(zip(cols, row))
+
+        # 5. Fragmentation et Gaspillage d'espace
+        q5 = """
+            SELECT i.owner, i.index_name AS "NOM_INDEX", ROUND(s.bytes / 1024 / 1024, 2) AS "TAILLE_ALLOUEE_MB", 
+                   i.blevel AS "NIVEAU_BLEVEL", i.leaf_blocks AS "NB_LEAF_BLOCKS", 
+                   i.distinct_keys AS "NB_CLES_DISTINCTES", st.lf_rows AS "NB_LIGNES_FEUILLES", 
+                   st.del_lf_rows AS "NB_LIGNES_SUPPR_MAIS_OCCUPEES", 
+                   ROUND((st.del_lf_rows / NULLIF(st.lf_rows, 0)) * 100, 2) AS "TAUX_FRAGMENTATION_PCT", 
+                   ROUND(st.used_space / 1024 / 1024, 2) AS "TAILLE_UTILE_REELLE_MB", 
+                   ROUND((s.bytes - st.used_space) / 1024 / 1024, 2) AS "ESPACE_GASPILLE_MB", 
+                   ROUND(((s.bytes - st.used_space) / NULLIF(s.bytes, 0)) * 100, 2) AS "POURCENTAGE_GASPILLAGE_TOTAL" 
+            FROM dba_indexes i 
+            JOIN dba_segments s ON i.owner = s.owner AND i.index_name = s.segment_name 
+            LEFT JOIN index_stats st ON i.index_name = st.name 
+            WHERE i.index_name = UPPER(:index_name) AND s.segment_type = 'INDEX'
+        """
+        cursor.execute(q5, index_name=index_name)
+        row = cursor.fetchone()
+        if row:
+            cols = [col[0] for col in cursor.description]
+            results["fragmentation"] = dict(zip(cols, row))
+
+        # 6. Historique de charge (AWR)
+        q6 = """
+            SELECT TO_CHAR(sn.begin_interval_time, 'MM-DD HH24:MI') AS date_snap, 
+                   ss.logical_reads_delta AS lectures_ram, 
+                   ss.physical_reads_delta AS lectures_disque 
+            FROM dba_hist_seg_stat ss 
+            JOIN dba_hist_snapshot sn ON ss.snap_id = sn.snap_id AND ss.instance_number = sn.instance_number 
+            WHERE ss.obj# = (SELECT object_id FROM dba_objects WHERE object_name = UPPER(:index_name) AND object_type = 'INDEX' AND rownum = 1) 
+            AND sn.begin_interval_time > SYSDATE - 7 
+            ORDER BY sn.snap_id ASC
+        """
+        cursor.execute(q6, index_name=index_name)
+        cols = [col[0] for col in cursor.description]
+        results["history"] = [dict(zip(cols, r)) for r in cursor.fetchall()]
+
+        # 7. Radar de Statistiques Périmées (Stale Stats)
+        q7 = """
+            SELECT t.table_name, t.num_rows AS lignes_connues_optimiseur, 
+                   NVL(m.inserts, 0) + NVL(m.updates, 0) + NVL(m.deletes, 0) AS total_modifications_recentes, 
+                   TO_CHAR(t.last_analyzed, 'DD/MM/YYYY HH24:MI') AS date_derniere_analyse, 
+                   ROUND((NVL(m.inserts, 0) + NVL(m.updates, 0) + NVL(m.deletes, 0)) / NULLIF(t.num_rows, 0) * 100, 2) AS pct_obsolescence 
+            FROM dba_tables t 
+            LEFT JOIN dba_tab_modifications m ON t.table_name = m.table_name AND t.owner = m.table_owner 
+            WHERE t.table_name = (SELECT table_name FROM dba_indexes WHERE index_name = UPPER(:index_name) AND rownum = 1)
+        """
+        cursor.execute(q7, index_name=index_name)
+        row = cursor.fetchone()
+        if row:
+            cols = [col[0] for col in cursor.description]
+            results["stale_stats"] = dict(zip(cols, row))
+
+        conn.close()
+        return results, None
+
+    except Exception as e:
+        if conn: conn.close()
+        return None, str(e)
+
+def validate_index_structure(id_base, owner, index_name):
+    conn, db_type, err = get_db_connection(id_base)
+    if err or not conn:
+        return None, err or "Inaccessible"
+    
+    try:
+        cursor = conn.cursor()
+        # 1. Lancer l'analyse (SANS ONLINE comme demandé)
+        sql_analyze = f"ANALYZE INDEX {owner}.{index_name} VALIDATE STRUCTURE"
+        cursor.execute(sql_analyze)
+        
+        # 2. Récupérer immédiatement les résultats depuis INDEX_STATS (session-scoped)
+        # On réutilise la requête Script 5
+        q_frag = """
+            SELECT i.owner, i.index_name AS "NOM_INDEX", ROUND(s.bytes / 1024 / 1024, 2) AS "TAILLE_ALLOUEE_MB", 
+                   i.blevel AS "NIVEAU_BLEVEL", i.leaf_blocks AS "NB_LEAF_BLOCKS", 
+                   i.distinct_keys AS "NB_CLES_DISTINCTES", st.lf_rows AS "NB_LIGNES_FEUILLES", 
+                   st.del_lf_rows AS "NB_LIGNES_SUPPR_MAIS_OCCUPEES", 
+                   ROUND((st.del_lf_rows / NULLIF(st.lf_rows, 0)) * 100, 2) AS "TAUX_FRAGMENTATION_PCT", 
+                   ROUND(st.used_space / 1024 / 1024, 2) AS "TAILLE_UTILE_REELLE_MB", 
+                   ROUND((s.bytes - st.used_space) / 1024 / 1024, 2) AS "ESPACE_GASPILLE_MB", 
+                   ROUND(((s.bytes - st.used_space) / NULLIF(s.bytes, 0)) * 100, 2) AS "POURCENTAGE_GASPILLAGE_TOTAL" 
+            FROM dba_indexes i 
+            JOIN dba_segments s ON i.owner = s.owner AND i.index_name = s.segment_name 
+            LEFT JOIN index_stats st ON i.index_name = st.name 
+            WHERE i.index_name = UPPER(:index_name) AND s.segment_type = 'INDEX'
+        """
+        cursor.execute(q_frag, index_name=index_name)
+        row = cursor.fetchone()
+        frag_data = {}
+        if row:
+            cols = [col[0] for col in cursor.description]
+            frag_data = dict(zip(cols, row))
+            
+        conn.close()
+        return frag_data, None
+    except Exception as e:
+        if conn: conn.close()
+        return None, str(e)
+
