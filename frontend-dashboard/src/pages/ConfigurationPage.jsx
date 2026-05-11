@@ -1,11 +1,35 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../api';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import GlassCard from '../components/GlassCard';
 import { Settings2, Database, Play, CheckCircle, Terminal, AlertCircle, Loader2, ChevronDown, ChevronUp, CheckSquare, Square, Search, X, ChevronRight, GitBranch, Bot } from 'lucide-react';
 
+/**
+ * Safe Parse : Garantit que les données de résultats sont toujours un tableau exploitable.
+ * - Si c'est déjà un tableau/objet, on l'utilise directement.
+ * - Si c'est une chaîne JSON, on la parse.
+ * - Si c'est invalide/vide, on retourne [].
+ */
+const safeParse = (rawData) => {
+  try {
+    if (Array.isArray(rawData)) return rawData;
+    if (rawData && typeof rawData === 'object') return [rawData];
+    if (typeof rawData === 'string') {
+      const parsed = JSON.parse(rawData);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    }
+    return [];
+  } catch (error) {
+    console.error("safeParse: Erreur de parsing sur les données d'audit:", error);
+    return [];
+  }
+};
+
 export default function ConfigurationPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const initialAuditId = searchParams.get('auditId');
+  
   const [bases, setBases] = useState([]);
   const [selectedBase, setSelectedBase] = useState(() => localStorage.getItem('og_dashboard_base') || '');
   const [scripts, setScripts] = useState([]);
@@ -50,6 +74,20 @@ export default function ConfigurationPage() {
       setError("Erreur de chargement des métriques.");
     });
   }, []);
+
+  // Effet pour charger un audit spécifique si présent dans l'URL
+  useEffect(() => {
+    if (initialAuditId) {
+      setLoading(true);
+      api.get(`/api/audit/results/${initialAuditId}`)
+        .then(r => {
+          setResults(r.data.results);
+          setOpenDropdown(null);
+        })
+        .catch(err => setError("Impossible de charger les résultats de l'audit spécifié."))
+        .finally(() => setLoading(false));
+    }
+  }, [initialAuditId]);
 
   useEffect(() => {
     localStorage.setItem('og_dashboard_metrics', JSON.stringify(selectedScripts));
@@ -96,15 +134,21 @@ export default function ConfigurationPage() {
     setResults(null);
     
     try {
+      // 1. Déclenchement du workflow persistant (POST)
       const payload = {
         id_base: parseInt(selectedBase),
-        scripts: selectedScripts
+        scripts_ids: selectedScripts.map(s => s.id)
       };
-      const response = await api.post('/api/audit/granular', payload);
-      setResults(response.data.data); // data.data is the dict {"Script Name": [results]}
+      const response = await api.post('/api/audit/run', payload);
+      const idAudit = response.data.id_audit;
+
+      // 2. Récupération automatique des résultats stockés (GET)
+      const resultsRes = await api.get(`/api/audit/results/${idAudit}`);
+      setResults(resultsRes.data.results);
+      
       setOpenDropdown(null);
     } catch (err) { 
-      setError(err.response?.data?.detail || "Erreur lors de l'exécution de l'audit."); 
+      setError(err.response?.data?.detail || "Erreur lors de l'exécution du workflow d'audit."); 
     } finally { 
       setLoading(false); 
     }
@@ -237,8 +281,8 @@ export default function ConfigurationPage() {
                 <button 
                   type="button"
                   onClick={() => {
-                    const allScripts = Object.values(categories).flat();
-                    setSelectedScripts(allScripts);
+                    const allScripts = Object.values(categorizedScripts).flat();
+                    setSelectedScripts(allScripts.map(s => ({ id: s.ID, nom: s.Nom_Scripte, code: s.Contenu_Script })));
                   }}
                   className="btn btn-ghost"
                   style={{ padding: '4px 8px', fontSize: '0.75rem', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}
@@ -378,8 +422,9 @@ export default function ConfigurationPage() {
             </div>
           )}
           {results ? (
-            Object.entries(results).map(([scriptName, dataArray], index) => {
-              const isError = dataArray.length > 0 && !!dataArray[0].Erreur;
+            Object.entries(results).map(([scriptName, rawArray], index) => {
+              const dataArray = safeParse(rawArray);
+              const isError = dataArray.length > 0 && (!!dataArray[0].erreur || !!dataArray[0].Erreur);
               return (
                 <GlassCard key={index} style={{ border: isError ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)', animation: `slideUp 0.4s ease ${index * 0.1}s` }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
@@ -393,7 +438,7 @@ export default function ConfigurationPage() {
                   </div>
 
                   {isError ? (
-                    <div className="alert alert-error" style={{ margin: 0 }}>{dataArray[0].Erreur}</div>
+                    <div className="alert alert-error" style={{ margin: 0 }}>{dataArray[0].erreur || dataArray[0].Erreur}</div>
                   ) : dataArray.length > 0 ? (
                     <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid rgba(255,255,255,0.05)', maxHeight: '400px' }}>
                       <table className="og-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>

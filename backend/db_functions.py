@@ -10,6 +10,7 @@ import requests # type: ignore
 import datetime
 import os
 import io
+import json
 from fpdf import FPDF
 from oracle_db import get_oracle_connection # type: ignore
 
@@ -1772,4 +1773,181 @@ def validate_index_structure(id_base, owner, index_name):
     except Exception as e:
         if conn: conn.close()
         return None, str(e)
+
+# ==========================================
+# 9. WORKFLOW D'AUDIT COMPLET
+# ==========================================
+
+def run_audit_workflow(id_base, scripts_ids=None):
+    """
+    Exécute tous les scripts métriques (ou une sélection) pour une base, stocke les résultats en CLOB JSON.
+    Retourne l'ID_AUDIT numérique.
+    """
+    id_audit = int(datetime.datetime.now().strftime('%Y%m%d%H%M%S'))
+    
+    # 1. Récupérer le type de la base cible
+    conn_ref = get_oracle_connection()
+    if not conn_ref:
+        return None, "Erreur de connexion au référentiel."
+    
+    try:
+        cursor = conn_ref.cursor()
+        cursor.execute("SELECT ID_TYPE_BASE FROM BASE_CIBLE WHERE ID_BASE = :id", id=id_base)
+        row = cursor.fetchone()
+        if not row:
+            return None, "Base cible introuvable."
+        id_type_base = row[0]
+        
+        # 2. Récupérer les scripts pour ce type de base (filtre optionnel par ID)
+        if scripts_ids:
+            # Construction sécurisée de la clause IN pour Oracle
+            placeholders = ", ".join([f":id{i}" for i in range(len(scripts_ids))])
+            sql_scripts = f"""
+                SELECT ID_METRIQUE, NOM_METRIQUE, SCRIPT_SQL, ID_TYPE_METRIQUE 
+                FROM METRIQUE 
+                WHERE ID_TYPE_BASE = :t AND ID_METRIQUE IN ({placeholders})
+            """
+            params = {"t": id_type_base}
+            for i, sid in enumerate(scripts_ids):
+                params[f"id{i}"] = sid
+            cursor.execute(sql_scripts, params)
+        else:
+            sql_scripts = """
+                SELECT ID_METRIQUE, NOM_METRIQUE, SCRIPT_SQL, ID_TYPE_METRIQUE 
+                FROM METRIQUE 
+                WHERE ID_TYPE_BASE = :t
+            """
+            cursor.execute(sql_scripts, t=id_type_base)
+        
+        scripts = []
+        for r in cursor.fetchall():
+            # Gestion du CLOB pour le script SQL
+            script_content = r[2].read() if hasattr(r[2], 'read') else str(r[2])
+            scripts.append({
+                "id": r[0],
+                "nom": r[1],
+                "sql": script_content,
+                "id_type_metrique": r[3]
+            })
+        
+        if not scripts:
+            return None, "Aucun script configuré ou sélectionné pour ce type de base."
+
+        # 3. Se connecter à la cible
+        conn_cible, type_db, err = get_db_connection(id_base)
+        if err or not conn_cible:
+            return None, f"Cible inaccessible : {err}"
+        
+        # 4. Exécuter chaque script et stocker
+        for s in scripts:
+            # ── Fix #2 : Nettoyage du script SQL avant exécution ──
+            script_sql = s["sql"].strip()                 # Supprime espaces/sauts de ligne parasites
+            if script_sql.endswith(';'):                  # ORA-00933 : pas de ; en fin de requête
+                script_sql = script_sql[:-1].rstrip()
+
+            try:
+                # Exécution sur la cible
+                df = pd.read_sql(script_sql, con=conn_cible)
+
+                # ── Fix #1 : Conversion des noms de colonnes en minuscules ──
+                df.columns = [c.lower() for c in df.columns]
+
+                # ── Fix #3 : Sérialisation JSON robuste (évite NaN/Infinity/dates) ──
+                records = df.where(df.notna(), None).to_dict(orient='records')
+                result_json = json.dumps(records, default=str, ensure_ascii=False)
+            except Exception as e:
+                # CECI EST CRUCIAL POUR EVITER L'ERREUR DE LECTURE CLOB
+                result_json = json.dumps([{"erreur": str(e)}])
+            
+            # Insertion dans AUDIT_RESULTATS (Base Applicative)
+            sql_insert = """
+                INSERT INTO AUDIT_RESULTATS 
+                (ID_AUDIT, ID_METRIQUE, ID_TYPE_METRIQUE, ID_TYPE_BASE_CIBLE, RESULTAT_METRIQUE, DATE_EXECUTION)
+                VALUES (:1, :2, :3, :4, :5, CURRENT_TIMESTAMP)
+            """
+            cursor.setinputsizes(None, None, None, None, oracledb.DB_TYPE_CLOB)
+            cursor.execute(sql_insert, [id_audit, s["id"], s["id_type_metrique"], id_type_base, result_json])
+        
+        conn_ref.commit()
+        conn_cible.close()
+        return id_audit, None
+        
+    except Exception as e:
+        return None, str(e)
+    finally:
+        if 'conn_ref' in locals() and conn_ref:
+            conn_ref.close()
+
+def get_audit_workflow_results(id_audit):
+    """
+    Récupère les résultats stockés pour un ID_AUDIT donné.
+    """
+    conn = get_oracle_connection()
+    if not conn:
+        return None, "Erreur de connexion au référentiel."
+    
+    try:
+        cursor = conn.cursor()
+        sql = """
+            SELECT m.NOM_METRIQUE, r.RESULTAT_METRIQUE, tm.NOM_TYPE_METRIQUE
+            FROM AUDIT_RESULTATS r
+            JOIN METRIQUE m ON r.ID_METRIQUE = m.ID_METRIQUE
+            LEFT JOIN TYPE_METRIQUE tm ON r.ID_TYPE_METRIQUE = tm.ID_TYPE_METRIQUE
+            WHERE r.ID_AUDIT = :id
+            ORDER BY r.DATE_EXECUTION ASC
+        """
+        cursor.execute(sql, id=id_audit)
+        
+        results = {}
+        for r in cursor.fetchall():
+            name = r[0]
+            # 1. Lecture robuste du CLOB
+            try:
+                valeur_clob = r[1].read() if hasattr(r[1], 'read') else str(r[1])
+                
+                # 2. Sécurité : si vide ou non-JSON, on évite le crash
+                if not valeur_clob or str(valeur_clob).strip() == "":
+                    data = []
+                else:
+                    try:
+                        # 3. Conversion en objet Python (pour éviter le double encodage JSON par FastAPI)
+                        raw_data = json.loads(valeur_clob)
+                        
+                        # Transformation : Garantir les clés en minuscules
+                        if isinstance(raw_data, list) and raw_data and isinstance(raw_data[0], dict):
+                            data = [{k.lower(): v for k, v in row.items()} for row in raw_data]
+                        else:
+                            data = raw_data
+                    except json.JSONDecodeError:
+                        # ── Fallback 1 : Réparer NaN/Infinity (pandas to_json legacy) ──
+                        try:
+                            cleaned = valeur_clob.replace('NaN', 'null').replace('Infinity', '"Infinity"').replace('-Infinity', '"-Infinity"')
+                            raw_data = json.loads(cleaned)
+                            if isinstance(raw_data, list) and raw_data and isinstance(raw_data[0], dict):
+                                data = [{k.lower(): v for k, v in row.items()} for row in raw_data]
+                            else:
+                                data = raw_data
+                        except (json.JSONDecodeError, Exception):
+                            # ── Fallback 2 : Tenter ast.literal_eval pour les anciens formats Python (guillemets simples) ──
+                            try:
+                                import ast
+                                raw_data = ast.literal_eval(valeur_clob)
+                                if isinstance(raw_data, list) and raw_data and isinstance(raw_data[0], dict):
+                                    data = [{k.lower(): v for k, v in row.items()} for row in raw_data]
+                                else:
+                                    data = raw_data if isinstance(raw_data, (list, dict)) else []
+                            except Exception:
+                                # Fallback final gracieux
+                                data = [{"erreur": "Format JSON invalide dans le CLOB", "aperçu": str(valeur_clob)[:200]}]
+            except Exception as read_err:
+                data = [{"erreur": f"Erreur technique de lecture CLOB : {read_err}"}]
+            
+            results[name] = data
+            
+        return results, None
+    except Exception as e:
+        return None, str(e)
+    finally:
+        if conn:
+            conn.close()
 

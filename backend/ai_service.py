@@ -22,20 +22,14 @@ def get_llama3_junior(context_data: str) -> str:
     ÉTAPE 1 : Le Diagnosticien (Llama 3 Local)
     Fait un constat sans proposer de solutions.
     """
-    system_prompt = """Tu es un Analyste DBA Oracle fonctionnant en environnement sécurisé local. Je te fournis les métriques du DERNIER audit et de l'audit ACTUEL.
-Ta tâche est de comparer ces données pour les 6 catégories et d'isoler les problèmes. Ne donne pas de solutions.
-Structure ta réponse OBLIGATOIREMENT ainsi :
-### 1. ÉVOLUTION DES 6 CATÉGORIES
-Fais un bilan comparatif (Amélioration, Dégradation ou Stabilité) pour TOUTES ces catégories, une par une :
-- Performance système : [Ton analyse]
-- Stockage : [Ton analyse]
-- Requêtes : [Ton analyse]
-- Connexions : [Ton analyse]
-- Réplication et HA : [Ton analyse]
-- Métier : [Ton analyse]
+    system_prompt = """Tu es un DBA Expert Oracle. Ton rôle est d'analyser les résultats du 'Diagnostic SQL' fournis en entrée. 
 
-### 2. ANOMALIES ET DÉGRADATIONS
-[Fais une liste à puces claire des problèmes critiques ou des régressions détectées entre les deux audits]."""
+Consignes strictes :
+1. ANALYSE INSTANTANÉE : Concentre-toi exclusivement sur les données JSON/Textuelles fournies dans le contexte actuel de l'audit. 
+2. PAS DE COMPARAISON : Ne fais aucune référence à des rapports passés, des tendances historiques ou des évolutions de performance, sauf si ces données sont explicitement présentes dans l'input actuel.
+3. DIAGNOSTIC CHIRURGICAL : Identifie les requêtes les plus lourdes, les événements d'attente (Wait Events) critiques et les anomalies de structure (index manquants, statistiques obsolètes) à partir des métriques capturées lors de cet audit précis.
+
+Ton analyse doit être concise, technique et directement exploitable par un administrateur système."""
     
     try:
         print(f"[DEBUG] Appel Llama 3 Junior (Local)...")
@@ -124,13 +118,14 @@ def analyze_granular_results(granular_data: dict) -> dict:
     
     try:
         # Étape 1 : Junior (Llama 3 Local)
-        system_prompt = """Tu es un Analyste DBA Oracle. Je te fournis les résultats de plusieurs scripts SQL exécutés sur une base de données.
-Ta tâche est d'analyser ces résultats bruts et d'isoler les anomalies ou les points d'attention. Ne donne pas de solutions.
-Structure ta réponse OBLIGATOIREMENT ainsi :
-### 1. ANALYSE DES RÉSULTATS PAR SCRIPT
-[Fais un bilan pour chaque script exécuté].
-### 2. ⚠️ ANOMALIES DÉTECTÉES
-[Liste les problèmes potentiels trouvés dans les données]."""
+        system_prompt = """Tu es un DBA Expert Oracle. Ton rôle est d'analyser les résultats du 'Diagnostic SQL' fournis en entrée. 
+
+Consignes strictes :
+1. ANALYSE INSTANTANÉE : Concentre-toi exclusivement sur les données JSON/Textuelles fournies dans le contexte actuel de l'audit. 
+2. PAS DE COMPARAISON : Ne fais aucune référence à des rapports passés, des tendances historiques ou des évolutions de performance, sauf si ces données sont explicitement présentes dans l'input actuel.
+3. DIAGNOSTIC CHIRURGICAL : Identifie les requêtes les plus lourdes, les événements d'attente (Wait Events) critiques et les anomalies de structure (index manquants, statistiques obsolètes) à partir des métriques capturées lors de cet audit précis.
+
+Ton analyse doit être concise, technique et directement exploitable par un administrateur système."""
 
         print(f"[DEBUG] Appel Llama 3 Junior pour Audit Granulaire...")
         response = ollama.chat(
@@ -160,12 +155,7 @@ def analyze_database_health(audit_data: dict, last_audit_data: dict = None) -> d
     """
     Orchestration Séquentielle Junior/Senior Sécurisée.
     """
-    context_data = ""
-    if last_audit_data and audit_data:
-        context_data = f"DERNIER AUDIT:\n{serialize_audit_data(last_audit_data)}\n\n"
-        context_data += f"AUDIT ACTUEL:\n{serialize_audit_data(audit_data)}"
-    else:
-        context_data = f"AUDIT (Pas d'historique dispo):\n{serialize_audit_data(audit_data)}"
+    context_data = f"RÉSULTATS DU DIAGNOSTIC SQL :\n{serialize_audit_data(audit_data)}"
     
     try:
         # Étape 1 : Junior (Llama 3 Local) - Reçoit tout le JSON brut

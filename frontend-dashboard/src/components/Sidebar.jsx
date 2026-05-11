@@ -1,7 +1,7 @@
 import React from 'react';
 // NOUVEAU : Ajout de l'icône Bot pour l'IA
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, ShieldCheck, Settings, Database, Code, Users, LogOut, Shield, Bot, FileText, Activity } from 'lucide-react'; 
+import { LayoutDashboard, Settings, Database, Code, Users, LogOut, Shield, Bot, FileText, Activity } from 'lucide-react'; 
 
 const ROLE_COLORS = {
   super_admin: '#ef4444', admin: '#f59e0b', consultant: '#0ea5e9', dba: '#10b981'

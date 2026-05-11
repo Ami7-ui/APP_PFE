@@ -94,6 +94,10 @@ class PHVAnalysisRequest(BaseModel):
     query: str
     plans: List[dict] # Liste des plans d'exécution (chaque plan est une liste d'étapes)
 
+class AuditRunRequest(BaseModel):
+    id_base: int
+    scripts_ids: Optional[List[int]] = None
+
 # ── ROUTES AUTHENTIFICATION ───────────────────────────────────────────────────
 
 @app.post("/api/login")
@@ -209,6 +213,27 @@ def run_full_audit(id_base: int):
     ok, msg, data = db_functions.executer_audit_complet(id_base)
     if not ok: raise HTTPException(status_code=503, detail=msg)
     return {"message": msg, "data": data}
+
+@app.post("/api/audit/run")
+def start_audit_workflow(req: AuditRunRequest):
+    """
+    Workflow d'audit complet : Exécution sur cible -> Stockage Oracle -> Retour ID_AUDIT.
+    Supporte la sélection granulaire via scripts_ids.
+    """
+    id_audit, error = db_functions.run_audit_workflow(req.id_base, req.scripts_ids)
+    if error:
+        raise HTTPException(status_code=500, detail=error)
+    return {"id_audit": id_audit}
+
+@app.get("/api/audit/results/{id_audit}")
+def get_audit_workflow_results(id_audit: int):
+    """
+    Récupère les résultats formatés d'un audit via son identifiant unique numérique.
+    """
+    results, error = db_functions.get_audit_workflow_results(id_audit)
+    if error:
+        raise HTTPException(status_code=404, detail=error)
+    return {"id_audit": id_audit, "results": results}
 
 @app.post("/api/execute_script/{id_base}")
 def execute_sql(id_base: int, req: SqlRequest):

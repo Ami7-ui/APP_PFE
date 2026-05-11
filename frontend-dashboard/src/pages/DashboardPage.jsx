@@ -11,6 +11,21 @@ import { Link } from 'react-router-dom';
 
 const CHART_COLORS = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6'];
 
+const safeParse = (rawData) => {
+  try {
+    if (Array.isArray(rawData)) return rawData;
+    if (rawData && typeof rawData === 'object') return [rawData];
+    if (typeof rawData === 'string') {
+      const parsed = JSON.parse(rawData);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    }
+    return [];
+  } catch (error) {
+    console.error("safeParse: Erreur de parsing Dashboard:", error);
+    return [];
+  }
+};
+
 function StatusBanner({ status }) {
   if (!status) return null;
   const isUp = status.status === 'UP';
@@ -82,8 +97,9 @@ function GaugeChart({ value, label, unit, color, maxValue = 100, displayValue })
   );
 }
 
-function DynamicMetricCard({ scriptName, dataArray }) {
-  if (!dataArray || dataArray.length === 0 || dataArray[0].Erreur) {
+function DynamicMetricCard({ scriptName, dataArray: rawData }) {
+  const dataArray = safeParse(rawData);
+  if (!dataArray || dataArray.length === 0 || dataArray[0]?.Erreur || dataArray[0]?.erreur) {
     return (
       <GlassCard className="hover-lift">
         <h3 style={{ fontSize: '0.9rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>{scriptName}</h3>
