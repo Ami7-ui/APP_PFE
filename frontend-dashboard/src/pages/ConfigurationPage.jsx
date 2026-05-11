@@ -3,6 +3,7 @@ import api from '../api';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import GlassCard from '../components/GlassCard';
 import { Settings2, Database, Play, CheckCircle, Terminal, AlertCircle, Loader2, ChevronDown, ChevronUp, CheckSquare, Square, Search, X, ChevronRight, GitBranch, Bot } from 'lucide-react';
+import ChatWidget from '../components/ChatWidget';
 
 /**
  * Safe Parse : Garantit que les données de résultats sont toujours un tableau exploitable.
@@ -218,6 +219,20 @@ export default function ConfigurationPage() {
   };
 
   const totalScripts = scripts.length;
+
+  // Préparation du contexte pour le Chatbot
+  const chatContext = {
+    module_type: "AUDIT",
+    contextId: initialAuditId || "new_audit",
+    rawData: results ? Object.entries(results).map(([name, data]) => ({ script: name, data: safeParse(data) })) : [],
+    errors: results ? Object.entries(results)
+      .map(([name, data]) => {
+        const parsed = safeParse(data);
+        const err = parsed.length > 0 ? (parsed[0].erreur || parsed[0].Erreur) : null;
+        return err ? `${name}: ${err}` : null;
+      })
+      .filter(Boolean) : []
+  };
 
   return (
     <div style={{ paddingBottom: '60px' }}>
@@ -628,6 +643,12 @@ export default function ConfigurationPage() {
           </GlassCard>
         </div>
       )}
+
+      {/* CHATBOT IA CONTEXTUEL */}
+      <ChatWidget 
+        context={chatContext} 
+        title="Expert DBA Oracle — Diagnostic" 
+      />
     </div>
   );
 }

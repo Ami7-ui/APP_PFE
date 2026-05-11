@@ -12,6 +12,7 @@ import ai_service
 import ollama
 import threading
 import time
+from chat_router import router as chat_router
 
 app = FastAPI(title="OracleGuard API")
 
@@ -23,6 +24,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(chat_router)
 
 # ── MODÈLES PYDANTIC (Regroupés) ─────────────────────────────────────────────
 
