@@ -7,11 +7,35 @@ import { Terminal, Copy, Check, Hash, Info, List } from 'lucide-react';
  * AiResponseViewer: Premium Markdown Renderer
  * Designed for the OracleGuard Hybrid AI pipeline.
  */
-const AiResponseViewer = ({ content }) => {
+const AiResponseViewer = ({ content, highlightTerm }) => {
   if (!content) return null;
 
+  // Helper pour surligner les termes dans le texte
+  const highlightContent = (text) => {
+    if (!highlightTerm || typeof text !== 'string') return text;
+    const parts = text.split(new RegExp(`(${highlightTerm})`, 'gi'));
+    return parts.map((part, i) => 
+      part.toLowerCase() === highlightTerm.toLowerCase() ? (
+        <span 
+          key={i} 
+          style={{ 
+            background: 'rgba(139, 92, 246, 0.4)', 
+            color: '#fff', 
+            borderRadius: '4px', 
+            padding: '0 4px',
+            boxShadow: '0 0 12px rgba(139, 92, 246, 0.6)',
+            fontWeight: 800,
+            border: '1px solid rgba(139, 92, 246, 0.4)'
+          }}
+        >
+          {part}
+        </span>
+      ) : part
+    );
+  };
+
   return (
-    <div className="markdown-container" style={{ color: '#cbd5e1', fontSize: '0.95rem' }}>
+    <div className="markdown-container" style={{ color: '#cbd5e1', fontSize: '0.95rem', fontFamily: "'Inter', 'Roboto Mono', monospace" }}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -45,7 +69,7 @@ const AiResponseViewer = ({ content }) => {
             );
           },
           // Surcharge des éléments pour un look Premium
-          p: ({ children }) => <p style={{ marginBottom: '18px', lineHeight: '1.7' }}>{children}</p>,
+          p: ({ children }) => <p style={{ marginBottom: '18px', lineHeight: '1.7' }}>{highlightContent(children)}</p>,
           ul: ({ children }) => <ul style={{ marginBottom: '18px', paddingLeft: '22px', listStyleType: 'none' }}>{children}</ul>,
           ol: ({ children }) => <ol style={{ marginBottom: '18px', paddingLeft: '22px', listStyleType: 'decimal' }}>{children}</ol>,
           li: ({ node, children, ...props }) => {
@@ -54,12 +78,12 @@ const AiResponseViewer = ({ content }) => {
             return (
               <li style={{ marginBottom: '10px', position: 'relative' }}>
                 {isUnordered && <span style={{ position: 'absolute', left: '-18px', color: '#8b5cf6' }}>•</span>}
-                {children}
+                {highlightContent(children)}
               </li>
             );
           },
-          h1: ({ children }) => <h1 style={{ color: '#fff', fontSize: '1.4rem', fontWeight: 800, margin: '28px 0 16px 0', display: 'flex', alignItems: 'center', gap: '10px' }}><Hash size={20} color="#8b5cf6" /> {children}</h1>,
-          h2: ({ children }) => <h2 style={{ color: '#fff', fontSize: '1.2rem', fontWeight: 700, margin: '32px 0 14px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>{children}</h2>,
+          h1: ({ children }) => <h1 style={{ color: '#fff', fontSize: '1.4rem', fontWeight: 800, margin: '28px 0 16px 0', display: 'flex', alignItems: 'center', gap: '10px' }}><Hash size={20} color="#8b5cf6" /> {highlightContent(children)}</h1>,
+          h2: ({ children }) => <h2 style={{ color: '#fff', fontSize: '1.2rem', fontWeight: 700, margin: '32px 0 14px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>{highlightContent(children)}</h2>,
           h3: ({ children }) => {
             const isVerdict = String(children).includes('Verdict');
             if (isVerdict) {
@@ -138,7 +162,7 @@ const AiResponseViewer = ({ content }) => {
               color: '#e2e8f0', 
               borderBottom: '1px solid rgba(255, 255, 255, 0.05)' 
             }}>
-              {children}
+              {highlightContent(children)}
             </td>
           ),
           tr: ({ children }) => <tr style={{ transition: 'all 0.2s' }}>{children}</tr>,

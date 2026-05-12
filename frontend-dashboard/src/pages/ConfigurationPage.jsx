@@ -5,12 +5,6 @@ import GlassCard from '../components/GlassCard';
 import { Settings2, Database, Play, CheckCircle, Terminal, AlertCircle, Loader2, ChevronDown, ChevronUp, CheckSquare, Square, Search, X, ChevronRight, GitBranch, Bot, MessageSquare } from 'lucide-react';
 import ChatWidget from '../components/ChatWidget';
 
-/**
- * Safe Parse : Garantit que les données de résultats sont toujours un tableau exploitable.
- * - Si c'est déjà un tableau/objet, on l'utilise directement.
- * - Si c'est une chaîne JSON, on la parse.
- * - Si c'est invalide/vide, on retourne [].
- */
 const safeParse = (rawData) => {
   try {
     if (Array.isArray(rawData)) return rawData;
@@ -26,6 +20,126 @@ const safeParse = (rawData) => {
   }
 };
 
+const AuditResultCard = ({ scriptName, rawArray, index, openPlanModal, onShowJson }) => {
+  const dataArray = safeParse(rawArray);
+  const isError = dataArray.length > 0 && (!!dataArray[0].erreur || !!dataArray[0].Erreur);
+  
+  const getBadgeStyle = () => {
+    if (isError) return { background: 'rgba(249, 115, 22, 0.2)', color: '#fb923c', border: '1px solid rgba(249, 115, 22, 0.3)' };
+    if (dataArray.length === 0) return { background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)' };
+    return { background: 'rgba(16, 185, 129, 0.2)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)' };
+  };
+
+  return (
+    <GlassCard className="flex flex-col h-full overflow-hidden" style={{ border: isError ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)', animation: `slideUp 0.4s ease ${index * 0.1}s` }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+         <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: 10, margin: 0 }}>
+            {isError ? <AlertCircle size={18} color="#ef4444" /> : <CheckCircle size={18} color="#10b981" />} 
+            <span className="truncate max-w-[200px]">{scriptName}</span>
+         </h3>
+         <span style={{ 
+           fontSize: '0.65rem', fontWeight: 800, padding: '4px 10px', borderRadius: '20px', whiteSpace: 'nowrap',
+           ...getBadgeStyle()
+         }}>
+           {dataArray.length} LIGNES
+         </span>
+      </div>
+
+      {isError ? (
+        <div style={{ padding: '12px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '8px', color: '#f87171', fontSize: '0.85rem' }}>
+          {dataArray[0].erreur || dataArray[0].Erreur}
+        </div>
+      ) : dataArray.length > 0 ? (
+        <div style={{ 
+          flex: 1, 
+          overflow: 'hidden', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          border: '1px solid rgba(255,255,255,0.05)', 
+          borderRadius: '10px' 
+        }}>
+          <div className="custom-scrollbar" style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '400px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+               <thead style={{ position: 'sticky', top: 0, background: 'rgba(15, 23, 42, 0.98)', zIndex: 20, backdropFilter: 'blur(10px)' }}>
+                 <tr>
+                   {Object.keys(dataArray[0]).map(k => (
+                     <th key={k} style={{ 
+                       padding: '12px 14px', textAlign: 'left', color: '#94a3b8', 
+                       borderBottom: '1px solid rgba(255,255,255,0.1)', 
+                       textTransform: 'uppercase', fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.05em',
+                       whiteSpace: 'nowrap'
+                     }}>
+                       {k}
+                     </th>
+                   ))}
+                 </tr>
+               </thead>
+               <tbody>
+                 {dataArray.map((row, i) => (
+                   <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }} className="hover:bg-white/5 transition-colors">
+                     {Object.keys(dataArray[0]).map((key, j) => {
+                       const val = row[key];
+                       const isSql = key.toUpperCase().includes('SQL_TEXT') || key.toUpperCase().includes('SQL_FULLTEXT');
+                       const isJson = key.toUpperCase() === 'RESULTAT_METRIQUE';
+                       const isSqlId = key.toUpperCase() === 'SQL_ID';
+
+                       return (
+                         <td key={j} style={{ 
+                           padding: '10px 14px', color: '#cbd5e1', 
+                           fontFamily: (typeof val === 'number' || isSqlId) ? "'Fira Code', monospace" : 'inherit',
+                           maxWidth: isSql ? '300px' : 'none'
+                         }}>
+                            {val != null ? (
+                              isSqlId ? (
+                                <button 
+                                  onClick={() => openPlanModal(String(val))}
+                                  style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', padding: 0, textDecoration: 'underline', fontWeight: 700 }}
+                                >
+                                  {String(val)}
+                                </button>
+                              ) : isJson ? (
+                                <button 
+                                  onClick={() => onShowJson(val)}
+                                  style={{ 
+                                    background: 'rgba(139, 92, 246, 0.1)', border: '1px dashed rgba(139, 92, 246, 0.4)', 
+                                    color: '#a78bfa', fontSize: '0.7rem', padding: '4px 8px', borderRadius: '6px',
+                                    display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer'
+                                  }}
+                                >
+                                  <Bot size={12} /> Voir JSON
+                                </button>
+                              ) : isSql ? (
+                                <div style={{ 
+                                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', 
+                                  cursor: 'help', color: '#94a3b8' 
+                                }} title={String(val)}>
+                                  {String(val)}
+                                </div>
+                              ) : (
+                                <span style={{ whiteSpace: 'nowrap' }}>{String(val)}</span>
+                              )
+                            ) : (
+                              <span style={{ color: '#475569', fontStyle: 'italic' }}>NULL</span>
+                            )}
+                         </td>
+                       );
+                     })}
+                   </tr>
+                 ))}
+               </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <div style={{ padding: '30px', textAlign: 'center', color: '#475569', fontSize: '0.85rem', background: 'rgba(0,0,0,0.15)', borderRadius: '12px' }}>
+          <Search size={24} style={{ opacity: 0.3, marginBottom: 8 }} /><br />
+          Aucune donnée
+        </div>
+      )}
+    </GlassCard>
+  );
+};
+
 export default function ConfigurationPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -39,7 +153,7 @@ export default function ConfigurationPage() {
   const [selectedScripts, setSelectedScripts] = useState(() => {
     const saved = localStorage.getItem('og_dashboard_metrics');
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) { return []; }
+      try { return JSON.parse(saved); } catch (_) { return []; }
     }
     return [];
   });
@@ -61,6 +175,10 @@ export default function ConfigurationPage() {
   const [planDetails, setPlanDetails] = useState(null);
   const [loadingPlan, setLoadingPlan] = useState(false);
   const [modalError, setModalError] = useState('');
+
+  // JSON Modal states
+  const [jsonModalOpen, setJsonModalOpen] = useState(false);
+  const [jsonModalData, setJsonModalData] = useState(null);
 
   useEffect(() => {
     // Charger les bases
@@ -220,7 +338,7 @@ export default function ConfigurationPage() {
     "Connexion": scripts.filter(s => s.id_type_metrique === 22)
   };
 
-  const totalScripts = scripts.length;
+
 
   // Préparation du contexte pour le Chatbot
   const chatContext = {
@@ -268,8 +386,8 @@ export default function ConfigurationPage() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 1fr) 2fr', gap: '24px', alignItems: 'start' }}>
         
-        {/* COLONNE GAUCHE : FORMULAIRE */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }} ref={dropdownRef}>
+        {/* COLONNE GAUCHE : FORMULAIRE (DYNAMIQUE) */}
+        <div className="flex flex-col gap-5 min-w-[320px]" ref={dropdownRef}>
           <GlassCard style={{ padding: '24px', position: 'relative', overflow: 'visible' }}>
             <h2 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '24px', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '10px' }}>
               <Database size={20} color="#0ea5e9" /> Configuration
@@ -439,8 +557,8 @@ export default function ConfigurationPage() {
           </GlassCard>
         </div>
 
-        {/* COLONNE DROITE : RESULTATS */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        {/* COLONNE DROITE : RESULTATS (RESPONSIVE GRID) */}
+        <div className="flex-1 overflow-hidden flex flex-col gap-5">
           {results && (
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '10px' }}>
               <button 
@@ -453,61 +571,21 @@ export default function ConfigurationPage() {
             </div>
           )}
           {results ? (
-            Object.entries(results).map(([scriptName, rawArray], index) => {
-              const dataArray = safeParse(rawArray);
-              const isError = dataArray.length > 0 && (!!dataArray[0].erreur || !!dataArray[0].Erreur);
-              return (
-                <GlassCard key={index} style={{ border: isError ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)', animation: `slideUp 0.4s ease ${index * 0.1}s` }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-                     <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: 10 }}>
-                        {isError ? <AlertCircle size={20} color="#ef4444" /> : <CheckCircle size={20} color="#10b981" />} 
-                        {scriptName}
-                     </h3>
-                     <span className="badge" style={{ background: 'rgba(255,255,255,0.05)', color: '#94a3b8' }}>
-                       {dataArray.length} lignes
-                     </span>
-                  </div>
-
-                  {isError ? (
-                    <div className="alert alert-error" style={{ margin: 0 }}>{dataArray[0].erreur || dataArray[0].Erreur}</div>
-                  ) : dataArray.length > 0 ? (
-                    <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid rgba(255,255,255,0.05)', maxHeight: '400px' }}>
-                      <table className="og-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                         <thead style={{ position: 'sticky', top: 0, background: 'rgba(15, 23, 42, 0.95)', zIndex: 10, backdropFilter: 'blur(5px)' }}>
-                           <tr>{Object.keys(dataArray[0]).map(k => <th key={k} style={{ padding: '10px 14px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>{k}</th>)}</tr>
-                         </thead>
-                         <tbody>{dataArray.map((r,i) => (
-                           <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
-                             {Object.keys(dataArray[0]).map((k, j) => {
-                               const v = r[k];
-                               return (
-                                 <td key={j} style={{ padding: '8px 14px', color: '#cbd5e1', whiteSpace: 'nowrap', fontFamily: typeof v === 'number' ? "'Fira Code', monospace" : 'inherit' }}>
-                                   {v != null ? (
-                                     k.toUpperCase() === 'SQL_ID' ? (
-                                       <button 
-                                         onClick={() => openPlanModal(String(v))}
-                                         style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', padding: 0, textDecoration: 'underline', fontWeight: 600 }}
-                                       >
-                                         {String(v)}
-                                       </button>
-                                     ) : String(v)
-                                   ) : <span style={{ color: '#64748b' }}>NULL</span>}
-                                 </td>
-                               );
-                             })}
-                           </tr>
-                         ))}</tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div style={{ padding: '20px', textAlign: 'center', color: '#64748b', fontSize: '0.9rem', background: 'rgba(0,0,0,0.1)', borderRadius: '8px' }}>
-                      <Search size={24} style={{ opacity: 0.5, marginBottom: '8px' }} /><br />
-                      Aucune donnée retournée par la base pour ce script.
-                    </div>
-                  )}
-                </GlassCard>
-              );
-            })
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 overflow-y-auto pr-2 custom-scrollbar pb-10">
+              {Object.entries(results).map(([scriptName, rawArray], index) => (
+                <AuditResultCard 
+                  key={index}
+                  scriptName={scriptName}
+                  rawArray={rawArray}
+                  index={index}
+                  openPlanModal={openPlanModal}
+                  onShowJson={(data) => {
+                    setJsonModalData(data);
+                    setJsonModalOpen(true);
+                  }}
+                />
+              ))}
+            </div>
           ) : (
             <div style={{ 
               height: '100%', 
@@ -659,6 +737,39 @@ export default function ConfigurationPage() {
           </GlassCard>
         </div>
       )}
+
+      {/* JSON MODAL */}
+      {jsonModalOpen && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(2, 6, 23, 0.7)', backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 2000, padding: '20px'
+        }}>
+          <GlassCard style={{ width: '100%', maxWidth: '700px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0, border: '1px solid rgba(139, 92, 246, 0.3)' }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.05)', background: 'rgba(139, 92, 246, 0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+               <h3 style={{ margin: 0, color: '#c4b5fd', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 10 }}>
+                 <Bot size={18} /> Détails de la Métrique (JSON)
+               </h3>
+               <button onClick={() => setJsonModalOpen(false)} style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer' }}>
+                  <X size={20} />
+               </button>
+            </div>
+            <div className="custom-scrollbar" style={{ flex: 1, overflowY: 'auto', padding: '20px', background: 'rgba(0,0,0,0.2)' }}>
+              <pre style={{ margin: 0, fontSize: '0.75rem', fontFamily: 'monospace', color: '#34d399', whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>
+                {(() => {
+                  try {
+                    return typeof jsonModalData === 'string' ? JSON.stringify(JSON.parse(jsonModalData), null, 2) : JSON.stringify(jsonModalData, null, 2);
+                  } catch(_) {
+                    return String(jsonModalData);
+                  }
+                })()}
+              </pre>
+            </div>
+          </GlassCard>
+        </div>
+      )}
+      <div style={{ marginBottom: '40px' }} />
 
       </div>
 

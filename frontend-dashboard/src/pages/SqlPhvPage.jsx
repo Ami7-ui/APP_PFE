@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api';
 import GlassCard from '../components/GlassCard';
-import { Activity, Database, LayoutList, ChevronRight, ChevronDown, X, AlertCircle, Loader2, GitBranch, Code, Bot, Search, MessageSquare, History } from 'lucide-react';
+import { Activity, Database, AlertCircle, Loader2, GitBranch, Bot, Search, History, LayoutList, X } from 'lucide-react';
 import TableAutopsyDrawer from '../components/TableAutopsyDrawer';
 import IndexAnalysisDrawer from '../components/IndexAnalysisDrawer';
 import AiResponseViewer from '../components/AiResponseViewer';
-import ChatWidget from '../components/ChatWidget';
 
 export default function SqlPhvPage() {
   const [bases, setBases] = useState([]);
@@ -19,14 +18,74 @@ export default function SqlPhvPage() {
   const [loadingPlans, setLoadingPlans] = useState({}); // { phv: true/false }
   const [error, setError] = useState('');
 
-  const [isChatOpen, setIsChatOpen] = useState(false);
   const [isAutopsyOpen, setIsAutopsyOpen] = useState(false);
   const [autopsyTable, setAutopsyTable] = useState('');
   const [isIndexAutopsyOpen, setIsIndexAutopsyOpen] = useState(false);
   const [autopsyIndex, setAutopsyIndex] = useState('');
 
+  // États Workstation DBA
+  const [panelSplitRatio, setPanelSplitRatio] = useState(() => {
+    const saved = localStorage.getItem('sqlPhvPanelSplit');
+    return saved ? parseFloat(saved) : 60;
+  });
+  const [isDraggingSplitter, setIsDraggingSplitter] = useState(false);
+  const [fullscreenPhv, setFullscreenPhv] = useState(null);
+  const [autoExpandAi, setAutoExpandAi] = useState(false);
+  const [hoveredOperation, setHoveredOperation] = useState(null);
+
   const [aiAnalysisResult, setAiAnalysisResult] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  // Redimensionnement du rapport IA
+  const [reportHeight, setReportHeight] = useState(() => {
+    const saved = localStorage.getItem('sqlPhvReportHeight');
+    return saved ? parseInt(saved, 10) : 300;
+  });
+  const [isResizing, setIsResizing] = useState(false);
+
+  const startResizing = useCallback((e) => {
+    e.preventDefault();
+    setIsDraggingSplitter(true);
+  }, []);
+
+  const stopResizing = useCallback(() => {
+    setIsDraggingSplitter(false);
+  }, []);
+
+  const onResize = useCallback((e) => {
+    if (!isDraggingSplitter) return;
+    
+    const container = document.getElementById('workstation-container');
+    if (!container) return;
+    
+    const rect = container.getBoundingClientRect();
+    const relativeY = e.clientY - rect.top;
+    const newRatio = (relativeY / rect.height) * 100;
+    
+    if (newRatio >= 10 && newRatio <= 90) {
+      setPanelSplitRatio(newRatio);
+      localStorage.setItem('sqlPhvPanelSplit', newRatio.toString());
+    }
+  }, [isDraggingSplitter]);
+
+  const toggleFocusMode = useCallback(() => {
+    // Mode Toggle: 90/10 (Focus Plans) <-> 30/70 (Focus Expert)
+    const nextRatio = panelSplitRatio > 50 ? 15 : 85;
+    setPanelSplitRatio(nextRatio);
+    localStorage.setItem('sqlPhvPanelSplit', nextRatio.toString());
+  }, [panelSplitRatio]);
+
+  useEffect(() => {
+    if (isDraggingSplitter) {
+      window.addEventListener('mousemove', onResize);
+      window.addEventListener('mouseup', stopResizing);
+    }
+    return () => {
+      window.removeEventListener('mousemove', onResize);
+      window.removeEventListener('mouseup', stopResizing);
+    };
+  }, [isDraggingSplitter, onResize, stopResizing]);
+
 
   // 1. Charger les bases cibles au montage
   useEffect(() => {
@@ -95,11 +154,18 @@ export default function SqlPhvPage() {
           node.depth = 0;
           nodeMap[node.ID || node.id] = node;
         });
-        rawData.forEach(node => {
+
+        // Calcul récursif de la profondeur
+        const getDepth = (node) => {
           const pId = node.PARENT_ID !== undefined ? node.PARENT_ID : node.parent_id;
           if (pId !== null && pId !== undefined && nodeMap[pId]) {
-            node.depth = nodeMap[pId].depth + 1;
+            return 1 + getDepth(nodeMap[pId]);
           }
+          return 0;
+        };
+
+        rawData.forEach(node => {
+          node.depth = getDepth(node);
         });
         console.log(`Plan formaté pour PHV ${phv} (${rawData.length} lignes):`, rawData);
         setPhvPlans(prev => ({ ...prev, [phv]: rawData }));
@@ -276,87 +342,206 @@ export default function SqlPhvPage() {
         </div>
       </div>
 
-      {/* ZONE CENTRALE : COMPARAISON DES PLANS (SIDE-BY-SIDE) */}
-      <div style={{ flex: 1, minHeight: '300px', display: 'flex', overflowX: 'auto', background: '#020617', padding: '10px' }} className="custom-scrollbar">
+      {/* ZONE CENTRALE : WORKSTATION DBA */}
+      <div 
+        id="workstation-container"
+        style={{ 
+          flex: 1, 
+          display: 'flex', 
+          flexDirection: 'column', 
+          overflow: 'hidden', 
+          background: '#020617',
+          position: 'relative'
+        }}
+      >
         {selectedSqlId ? (
-          <div style={{ display: 'flex', gap: '10px', height: '100%', minWidth: '100%', flex: 1 }}>
-            {Object.entries(phvPlans).length === 0 ? (
-               <div style={{ margin: 'auto', color: '#64748b', textAlign: 'center' }}>
-                 <p>Aucun plan d'exécution (PHV) trouvé pour cette requête.</p>
-               </div>
-            ) : (
-              Object.entries(phvPlans).map(([phv, steps], idx) => (
-                <div key={phv} style={{ flex: 1, minWidth: '500px', display: 'flex', flexDirection: 'column' }}>
-                  <GlassCard style={{ padding: 0, height: '100%', display: 'flex', flexDirection: 'column', border: '1px solid rgba(255,255,255,0.05)' }}>
-                    <div style={{ padding: '12px 20px', background: 'rgba(15, 23, 42, 0.8)', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <GitBranch size={16} color="#38bdf8" />
-                        <span style={{ fontWeight: 700, color: '#f8fafc', fontSize: '0.9rem', fontFamily: 'monospace' }}>PHV: {phv}</span>
-                      </div>
-                      {loadingPlans[phv] && <Loader2 size={14} className="spinner" color="#38bdf8" />}
-                    </div>
-                    
-                    <div style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', position: 'relative' }}>
-                      {!steps && loadingPlans[phv] ? (
-                        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-                          <Loader2 size={24} className="spinner" color="#38bdf8" />
-                          <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Chargement...</span>
+          <>
+            {/* PANNEAU HAUT : PLANS PHV */}
+            <div style={{ 
+              height: fullscreenPhv ? '100%' : `${panelSplitRatio}%`, 
+              minHeight: fullscreenPhv ? '100%' : '100px',
+              display: 'flex', 
+              overflowX: 'auto', 
+              padding: '12px',
+              transition: isDraggingSplitter ? 'none' : 'height 0.3s ease',
+              zIndex: fullscreenPhv ? 50 : 1
+            }} className="custom-scrollbar">
+              <div style={{ display: 'flex', gap: '12px', height: '100%', minWidth: '100%', flex: 1 }}>
+                {Object.entries(phvPlans).length === 0 ? (
+                   <div style={{ margin: 'auto', color: '#64748b', textAlign: 'center' }}>
+                     <p>Aucun plan d'exécution (PHV) trouvé pour cette requête.</p>
+                   </div>
+                ) : (
+                  Object.entries(phvPlans)
+                    .filter(([phv]) => !fullscreenPhv || phv === fullscreenPhv)
+                    .map(([phv, steps]) => (
+                    <div key={phv} style={{ flex: 1, minWidth: fullscreenPhv ? '100%' : '550px', display: 'flex', flexDirection: 'column' }}>
+                      <GlassCard style={{ padding: 0, height: '100%', display: 'flex', flexDirection: 'column', border: '1px solid rgba(255,255,255,0.05)', overflow: 'hidden' }}>
+                        <div style={{ padding: '10px 16px', background: 'rgba(15, 23, 42, 0.8)', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <GitBranch size={16} color="#38bdf8" />
+                            <span style={{ fontWeight: 700, color: '#f8fafc', fontSize: '0.85rem', fontFamily: 'monospace' }}>PHV: {phv}</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            {loadingPlans[phv] && <Loader2 size={14} className="spinner" color="#38bdf8" />}
+                            <button 
+                              onClick={() => setFullscreenPhv(fullscreenPhv === phv ? null : phv)}
+                              style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '4px' }}
+                              title="Plein écran"
+                            >
+                              {fullscreenPhv === phv ? <X size={16} /> : <LayoutList size={16} />}
+                            </button>
+                          </div>
                         </div>
-                      ) : !steps ? (
-                        <div style={{ padding: '40px', textAlign: 'center', color: '#64748b', fontSize: '0.8rem' }}>
-                          Erreur ou plan introuvable
-                        </div>
-                      ) : (
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
-                          <thead style={{ position: 'sticky', top: 0, background: 'rgba(15, 23, 42, 0.95)', zIndex: 10 }}>
-                            <tr>
-                              <th style={{ padding: '10px 14px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Opération</th>
-                              <th style={{ padding: '10px 14px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Objet</th>
-                              <th style={{ padding: '10px 14px', textAlign: 'right', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Cost</th>
-                              <th style={{ padding: '10px 14px', textAlign: 'right', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Rows</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(steps || []).map((node, i) => {
-                              const depth = node.depth || 0;
-                              const operation = node.OPERATION || node.operation;
-                              const options = node.OPTIONS || node.options;
-                              const opLabel = options ? `${operation} (${options})` : operation;
-                              const isFTS = opLabel.toUpperCase().includes('FULL');
-                              return (
-                                <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)', background: isFTS ? 'rgba(239, 68, 68, 0.05)' : 'transparent' }}>
-                                  <td style={{ padding: '6px 14px', paddingLeft: `${14 + depth * 16}px`, color: isFTS ? '#ef4444' : '#e2e8f0', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
-                                    {depth > 0 && <span style={{ color: 'rgba(255,255,255,0.1)' }}>└─</span>} {opLabel}
-                                  </td>
-                                  <td style={{ padding: '6px 14px', color: '#38bdf8', fontWeight: 600 }}>
-                                    {node.OBJECT_NAME || node.object_name ? (
-                                      <span 
-                                        onClick={() => {
-                                          const objName = node.OBJECT_NAME || node.object_name;
-                                          const objType = node.OBJECT_TYPE || node.object_type || '';
-                                          if (objType.toUpperCase().includes('INDEX')) { setAutopsyIndex(objName); setIsIndexAutopsyOpen(true); }
-                                          else { setAutopsyTable(objName); setIsAutopsyOpen(true); }
-                                        }}
-                                        style={{ cursor: 'pointer', borderBottom: '1px dashed rgba(56, 189, 248, 0.3)' }}
-                                      >
-                                        {node.OBJECT_NAME || node.object_name}
-                                      </span>
-                                    ) : '-'}
-                                  </td>
-                                  <td style={{ padding: '6px 14px', textAlign: 'right', color: '#94a3b8' }}>{node.COST || node.cost || '-'}</td>
-                                  <td style={{ padding: '6px 14px', textAlign: 'right', color: '#94a3b8' }}>{node.CARDINALITY || node.cardinality || '-'}</td>
+                        
+                        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', position: 'relative' }}>
+                          {!steps && loadingPlans[phv] ? (
+                            <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                              <Loader2 size={24} className="spinner" color="#38bdf8" />
+                              <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Chargement...</span>
+                            </div>
+                          ) : !steps ? (
+                            <div style={{ padding: '40px', textAlign: 'center', color: '#64748b', fontSize: '0.8rem' }}>
+                              Erreur ou plan introuvable
+                            </div>
+                          ) : (
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
+                              <thead style={{ position: 'sticky', top: 0, background: 'rgba(15, 23, 42, 0.95)', zIndex: 10 }}>
+                                <tr>
+                                  <th style={{ padding: '10px 14px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Opération</th>
+                                  <th style={{ padding: '10px 14px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Objet</th>
+                                  <th style={{ padding: '10px 14px', textAlign: 'right', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Cost</th>
+                                  <th style={{ padding: '10px 14px', textAlign: 'right', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Rows</th>
                                 </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      )}
+                              </thead>
+                              <tbody>
+                                {(steps || []).map((node, i) => {
+                                  const depth = node.depth || 0;
+                                  const operation = node.OPERATION || node.operation;
+                                  const options = node.OPTIONS || node.options;
+                                  const opLabel = options ? `${operation} (${options})` : operation;
+                                  const isFTS = opLabel.toUpperCase().includes('FULL');
+                                  return (
+                                    <tr 
+                                      key={i} 
+                                      onMouseEnter={() => setHoveredOperation(operation)}
+                                      onMouseLeave={() => setHoveredOperation(null)}
+                                      style={{ 
+                                        borderBottom: '1px solid rgba(255,255,255,0.02)', 
+                                        background: isFTS ? 'rgba(239, 68, 68, 0.05)' : 'transparent',
+                                        transition: 'background 0.2s'
+                                      }}
+                                    >
+                                      <td style={{ padding: '6px 14px', paddingLeft: `${14 + depth * 16}px`, color: isFTS ? '#ef4444' : '#e2e8f0', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                                        {depth > 0 && <span style={{ color: 'rgba(255,255,255,0.1)' }}>└─</span>} {opLabel}
+                                      </td>
+                                      <td style={{ padding: '6px 14px', color: '#38bdf8', fontWeight: 600 }}>
+                                        {node.OBJECT_NAME || node.object_name ? (
+                                          <span 
+                                            onClick={() => {
+                                              const objName = node.OBJECT_NAME || node.object_name;
+                                              const objType = node.OBJECT_TYPE || node.object_type || '';
+                                              if (objType.toUpperCase().includes('INDEX')) { setAutopsyIndex(objName); setIsIndexAutopsyOpen(true); }
+                                              else { setAutopsyTable(objName); setIsAutopsyOpen(true); }
+                                            }}
+                                            style={{ cursor: 'pointer', borderBottom: '1px dashed rgba(56, 189, 248, 0.3)' }}
+                                          >
+                                            {node.OBJECT_NAME || node.object_name}
+                                          </span>
+                                        ) : '-'}
+                                      </td>
+                                      <td style={{ padding: '6px 14px', textAlign: 'right', color: '#94a3b8' }}>{node.COST || node.cost || '-'}</td>
+                                      <td style={{ padding: '6px 14px', textAlign: 'right', color: '#94a3b8' }}>{node.CARDINALITY || node.cardinality || '-'}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      </GlassCard>
                     </div>
-                  </GlassCard>
-                </div>
-              ))
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* SPLITTER INTERACTIF */}
+            {!fullscreenPhv && (
+              <div 
+                onMouseDown={startResizing}
+                onDoubleClick={toggleFocusMode}
+                style={{ 
+                  height: '8px', 
+                  cursor: 'ns-resize', 
+                  background: isDraggingSplitter ? 'rgba(56, 189, 248, 0.4)' : 'rgba(15, 23, 42, 0.8)',
+                  borderTop: '1px solid rgba(255,255,255,0.05)',
+                  borderBottom: '1px solid rgba(255,255,255,0.05)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'background 0.2s',
+                  zIndex: 10
+                }}
+              >
+                <div style={{ width: '40px', height: '4px', borderRadius: '2px', background: 'rgba(255,255,255,0.1)' }}></div>
+              </div>
             )}
-          </div>
+
+            {/* PANNEAU BAS : RÉSULTAT DE L'ANALYSE IA */}
+            {(aiAnalysisResult || isAnalyzing) && !fullscreenPhv && (
+              <div 
+                style={{ 
+                  flex: 1,
+                  padding: '20px 24px', 
+                  background: 'rgba(15, 23, 42, 0.6)', 
+                  overflowY: autoExpandAi ? 'visible' : 'auto',
+                  height: autoExpandAi ? 'auto' : '100%',
+                  transition: isDraggingSplitter ? 'none' : 'height 0.3s ease'
+                }} 
+                className="custom-scrollbar"
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <Bot size={20} color="#a78bfa" />
+                    <h3 style={{ margin: 0, fontSize: '1rem', color: '#c4b5fd', fontWeight: 800 }}>Verdict de l'Expert DBA</h3>
+                  </div>
+                  <div style={{ display: 'flex', gap: '12px' }}>
+                    <button 
+                      onClick={() => setAutoExpandAi(!autoExpandAi)}
+                      style={{ 
+                        background: autoExpandAi ? 'rgba(167, 139, 250, 0.2)' : 'transparent', 
+                        border: '1px solid rgba(167, 139, 250, 0.3)', 
+                        color: '#a78bfa', padding: '4px 12px', borderRadius: '6px', fontSize: '0.75rem', cursor: 'pointer'
+                      }}
+                    >
+                      {autoExpandAi ? 'Réduire Scroll' : 'Expansion Totale'}
+                    </button>
+                  </div>
+                </div>
+                
+                {isAnalyzing ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', color: '#a78bfa', marginBottom: '10px' }}>
+                      <Loader2 size={24} className="spinner" />
+                      <span style={{ fontWeight: 600 }}>Analyse en cours par l'IA (nvidia_senior)...</span>
+                    </div>
+                    <div style={{ height: '15px', width: '100%', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', animation: 'pulse 1.5s infinite' }}></div>
+                    <div style={{ height: '15px', width: '90%', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', animation: 'pulse 1.5s infinite' }}></div>
+                  </div>
+                ) : (
+                  <div style={{ 
+                    animation: 'fadeIn 0.5s ease-out', 
+                    fontFamily: "'Roboto Mono', 'JetBrains Mono', monospace",
+                    fontSize: '0.85rem',
+                    letterSpacing: '-0.01em'
+                  }}>
+                    <AiResponseViewer content={aiAnalysisResult} highlightTerm={hoveredOperation} />
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         ) : (
           <div style={{ margin: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', opacity: 0.5 }}>
             <Activity size={80} color="#334155" />
@@ -365,39 +550,6 @@ export default function SqlPhvPage() {
           </div>
         )}
       </div>
-
-      {/* RÉSULTAT DE L'ANALYSE IA (VERDICT DE L'EXPERT) */}
-      {(aiAnalysisResult || isAnalyzing) && (
-        <div style={{ 
-          padding: '24px', 
-          background: 'rgba(15, 23, 42, 0.8)', 
-          borderTop: '2px solid #8b5cf6', 
-          minHeight: '200px', 
-          height: 'auto',
-          overflowY: 'auto' 
-        }} className="custom-scrollbar">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
-            <Bot size={24} color="#a78bfa" />
-            <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#c4b5fd', fontWeight: 800 }}>Verdict de l'Expert DBA</h3>
-          </div>
-          
-          {isAnalyzing ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', color: '#a78bfa', marginBottom: '10px' }}>
-                <Loader2 size={24} className="spinner" />
-                <span style={{ fontWeight: 600 }}>Analyse en cours par l'IA (nvidia_senior)...</span>
-              </div>
-              <div style={{ height: '15px', width: '100%', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', animation: 'pulse 1.5s infinite' }}></div>
-              <div style={{ height: '15px', width: '90%', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', animation: 'pulse 1.5s infinite' }}></div>
-              <div style={{ height: '15px', width: '95%', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', animation: 'pulse 1.5s infinite' }}></div>
-            </div>
-          ) : (
-            <div style={{ animation: 'fadeIn 0.5s ease-out' }}>
-              <AiResponseViewer content={aiAnalysisResult} />
-            </div>
-          )}
-        </div>
-      )}
 
       {/* FOOTER : BOUTON AI EXPERT */}
       <div style={{ padding: '16px 24px', background: 'rgba(15, 23, 42, 0.8)', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
