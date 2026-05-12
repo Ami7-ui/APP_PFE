@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import api from '../api';
 import GlassCard from '../components/GlassCard';
-import { Activity, Database, LayoutList, ChevronRight, ChevronDown, X, AlertCircle, Loader2, GitBranch, Code, Bot, Search } from 'lucide-react';
-import AiResponseViewer from '../components/AiResponseViewer';
+import { Activity, Database, LayoutList, ChevronRight, ChevronDown, X, AlertCircle, Loader2, GitBranch, Code, Bot, Search, MessageSquare, History } from 'lucide-react';
 import TableAutopsyDrawer from '../components/TableAutopsyDrawer';
 import IndexAnalysisDrawer from '../components/IndexAnalysisDrawer';
-
+import AiResponseViewer from '../components/AiResponseViewer';
+import ChatWidget from '../components/ChatWidget';
 
 export default function SqlPhvPage() {
   const [bases, setBases] = useState([]);
@@ -14,24 +14,19 @@ export default function SqlPhvPage() {
   const [phvList, setPhvList] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loadingList, setLoadingList] = useState(false);
-  
-  const [planDetails, setPlanDetails] = useState(null);
-  const [loadingDetails, setLoadingDetails] = useState(false);
   const [selectedSqlId, setSelectedSqlId] = useState(null);
-  const [selectedPhv, setSelectedPhv] = useState(null);
-  const [expandedSqlId, setExpandedSqlId] = useState(null);
+  const [phvPlans, setPhvPlans] = useState({}); // { phv: [steps], ... }
+  const [loadingPlans, setLoadingPlans] = useState({}); // { phv: true/false }
+  const [error, setError] = useState('');
 
-  const [aiAnalysisResult, setAiAnalysisResult] = useState('');
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-
+  const [isChatOpen, setIsChatOpen] = useState(false);
   const [isAutopsyOpen, setIsAutopsyOpen] = useState(false);
   const [autopsyTable, setAutopsyTable] = useState('');
-
   const [isIndexAutopsyOpen, setIsIndexAutopsyOpen] = useState(false);
   const [autopsyIndex, setAutopsyIndex] = useState('');
 
-
-  const [error, setError] = useState('');
+  const [aiAnalysisResult, setAiAnalysisResult] = useState('');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   // 1. Charger les bases cibles au montage
   useEffect(() => {
@@ -47,6 +42,9 @@ export default function SqlPhvPage() {
     setLoadingList(true);
     setPhvList([]);
     setError('');
+    setSelectedSqlId(null);
+    setPhvPlans({});
+    setAiAnalysisResult('');
     
     api.get(`/api/sql-phv-list/${selectedBase}`)
       .then(r => {
@@ -60,502 +58,395 @@ export default function SqlPhvPage() {
       });
   }, [selectedBase]);
 
-  // 3. Demander les détails d'un plan
-  const fetchPlanDetails = (sqlId, phv) => {
-    if (!selectedBase) return;
-    
+  // 3. Charger TOUS les plans pour un SQL_ID
+  const selectSqlId = (row) => {
+    const sqlId = row.SQL_ID || row.sql_id;
     setSelectedSqlId(sqlId);
-    setSelectedPhv(phv);
-    setLoadingDetails(true);
-    setPlanDetails(null);
-    setError('');
+    setAiAnalysisResult('');
     
+    // Initialiser les conteneurs de plans pour afficher les colonnes immédiatement
+    const phvString = row.PHV_LIST || row.phv_list || "";
+    const phvs = phvString.split(',').map(s => s.trim()).filter(Boolean);
+    
+    const initialPlans = {};
+    const initialLoading = {};
+    phvs.forEach(p => {
+      initialPlans[p] = null; 
+      initialLoading[p] = true;
+    });
+    
+    setPhvPlans(initialPlans);
+    setLoadingPlans(initialLoading);
+    
+    phvs.forEach(phv => {
+      loadPlan(sqlId, phv);
+    });
+  };
+
+  const loadPlan = (sqlId, phv) => {
+    setLoadingPlans(prev => ({ ...prev, [phv]: true }));
     api.get(`/api/sql-plan-details/${selectedBase}?sql_id=${sqlId}&phv=${phv}`)
       .then(r => {
-        // Calcul de la profondeur pour l'indentation (si depth n'est pas fourni)
-        const rawData = r.data.data || [];
-        const nodeMap = {};
+        console.log(`Données reçues pour PHV ${phv}:`, r.data);
+        const rawData = r.data.data || (Array.isArray(r.data) ? r.data : []);
         
-        // Initialiser la profondeur
+        const nodeMap = {};
         rawData.forEach(node => {
           node.depth = 0;
           nodeMap[node.ID || node.id] = node;
         });
-
-        // Calculer selon le parent_id
         rawData.forEach(node => {
           const pId = node.PARENT_ID !== undefined ? node.PARENT_ID : node.parent_id;
           if (pId !== null && pId !== undefined && nodeMap[pId]) {
             node.depth = nodeMap[pId].depth + 1;
           }
         });
-        
-        setPlanDetails(rawData);
+        console.log(`Plan formaté pour PHV ${phv} (${rawData.length} lignes):`, rawData);
+        setPhvPlans(prev => ({ ...prev, [phv]: rawData }));
       })
-      .catch((err) => {
-        setError(err.response?.data?.detail || "Erreur de chargement des détails du plan.");
+      .catch(err => {
+        console.error(`Error loading PHV ${phv}:`, err);
       })
       .finally(() => {
-        setLoadingDetails(false);
+        setLoadingPlans(prev => ({ ...prev, [phv]: false }));
       });
   };
 
-  // 4. Analyser le plan avec l'IA
+  // 4. Analyser les plans avec l'IA (nvidia_senior) - Traitement Sécurisé
   const handleAnalyzePlans = async () => {
     if (!selectedSqlId) return;
     
-    // Trouver la requête SQL originale et la liste des PHVs
     const row = phvList.find(r => (r.SQL_ID || r.sql_id) === selectedSqlId);
     const query = row ? (row.SCRIPT_SQL || row.script_sql) : "";
-    const phvString = row ? (row.PHV_LIST || row.phv_list || "") : "";
-    const phvs = phvString.split(',').map(s => s.trim()).filter(Boolean);
 
     setIsAnalyzing(true);
     setAiAnalysisResult('');
     
     try {
-      // 1. Récupérer les détails de TOUS les plans en parallèle
-      const allPlans = await Promise.all(phvs.map(async (p) => {
-        try {
-          const r = await api.get(`/api/sql-plan-details/${selectedBase}?sql_id=${selectedSqlId}&phv=${p}`);
-          return {
-            phv: p,
-            steps: r.data.data || []
-          };
-        } catch (e) {
-          console.error(`Erreur chargement PHV ${p}`, e);
-          return { phv: p, steps: [] };
-        }
+      const allPlans = Object.entries(phvPlans).map(([phv, steps]) => ({
+        phv: phv,
+        steps: (steps || []).map(s => ({
+          OPERATION: s.OPERATION || s.operation,
+          OPTIONS: s.OPTIONS || s.options,
+          OBJECT_NAME: s.OBJECT_NAME || s.object_name,
+          COST: s.COST || s.cost,
+          CARDINALITY: s.CARDINALITY || s.cardinality,
+          ID: s.ID || s.id,
+          PARENT_ID: s.PARENT_ID !== undefined ? s.PARENT_ID : s.parent_id
+        }))
       }));
 
-      // 2. Envoyer la collection complète au backend
       const response = await api.post('/api/ai/analyze-phv', {
         sql_id: selectedSqlId,
         query: query || "Requête non disponible",
         plans: allPlans
       });
-      setAiAnalysisResult(response.data.analysis);
+
+      // SAFE PARSE : Gestion des retours CLOB/JSON complexes
+      let result = response.data.analysis || "";
+      if (typeof result !== 'string') {
+        result = JSON.stringify(result);
+      }
+      
+      // Nettoyage des guillemets parasites (fréquent sur les sorties JSON backend directes)
+      if (result.startsWith('"') && result.endsWith('"') && result.length > 2) {
+        try {
+          result = JSON.parse(result);
+        } catch(e) {
+          result = result.substring(1, result.length - 1);
+        }
+      }
+
+      console.log("Analyse IA reçue et nettoyée:", result.substring(0, 100) + "...");
+      setAiAnalysisResult(result);
     } catch (err) {
-      setAiAnalysisResult("Erreur lors de l'analyse comparative : " + (err.response?.data?.detail || err.message));
+      console.error("AI Analysis Error:", err);
+      setAiAnalysisResult("Erreur lors de l'analyse : " + (err.response?.data?.detail || err.message));
     } finally {
       setIsAnalyzing(false);
     }
   };
 
+  // Préparation du contexte pour le Chatbot
+  const chatContext = {
+    module_type: "PHV_ANALYSIS",
+    sql_id: selectedSqlId,
+    sql_query: phvList.find(r => (r.SQL_ID || r.sql_id) === selectedSqlId)?.SCRIPT_SQL || "",
+    plans: Object.entries(phvPlans).map(([phv, steps]) => ({
+      phv: phv,
+      steps: (steps || []).map(s => ({
+        operation: s.OPERATION || s.operation,
+        options: s.OPTIONS || s.options,
+        object: s.OBJECT_NAME || s.object_name,
+        cost: s.COST || s.cost,
+        cardinality: s.CARDINALITY || s.cardinality,
+        depth: s.depth
+      }))
+    }))
+  };
+
   return (
-    <div style={{ paddingBottom: '60px' }}>
-      <div className="page-header">
-        <div className="page-header-icon" style={{ borderColor: 'rgba(56, 189, 248, 0.3)', background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(14, 165, 233, 0.15))', color: '#38bdf8', boxShadow: 'inset 0 0 20px rgba(56, 189, 248, 0.15)' }}>
-          <Activity size={28} />
-        </div>
-        <div>
-          <h1 className="page-title text-gradient" style={{ background: 'linear-gradient(135deg, #7dd3fc, #0ea5e9)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-            Analyse des Plans d'Exécution (PHV)
-          </h1>
-          <p className="page-subtitle">Pistez et analysez les instabilités des requêtes Oracle avec de multiples plans</p>
-        </div>
-      </div>
-
-      {error && <div className="alert alert-error" style={{ animation: 'slideUp 0.3s', marginBottom: 24 }}><AlertCircle size={18} /> {error}</div>}
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(350px, 1fr) 2fr', gap: '24px', alignItems: 'start' }}>
-        
-        {/* COLONNE GAUCHE : SÉLECTEUR ET VUE MAÎTRE */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          
-          <GlassCard style={{ padding: '24px' }}>
-            <h2 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '20px', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <Database size={18} color="#0ea5e9" /> Instance Oracle
-            </h2>
-            
-            <div style={{ position: 'relative' }}>
-              <select 
-                value={selectedBase} 
-                onChange={e => setSelectedBase(e.target.value)} 
-                style={{ 
-                  paddingLeft: 40, height: 46, width: '100%', 
-                  background: 'rgba(15, 23, 42, 0.6)', border: '1px solid rgba(255,255,255,0.1)', 
-                  borderRadius: '10px', color: '#e2e8f0', appearance: 'none', cursor: 'pointer'
-                }}>
-                <option value="" disabled>-- Choisir une base --</option>
-                {bases.map(b => <option key={b.ID} value={b.ID}>{b.Instance} — {b.IP}</option>)}
-              </select>
-              <Database size={16} color="#0ea5e9" style={{ position: 'absolute', left: 14, top: 15, pointerEvents: 'none' }} />
+    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 4px)', overflow: 'hidden', margin: '-20px' }}>
+      
+      {/* SECTION HAUTE : HEADER & SELECTEURS */}
+      <div style={{ padding: '20px 24px', background: 'rgba(15, 23, 42, 0.4)', borderBottom: '1px solid rgba(255,255,255,0.05)', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <div className="page-header-icon" style={{ width: 40, height: 40, borderColor: 'rgba(56, 189, 248, 0.3)', background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(14, 165, 233, 0.15))', color: '#38bdf8' }}>
+              <Activity size={22} />
             </div>
-          </GlassCard>
-
-          <GlassCard style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ padding: '20px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <LayoutList size={18} color="#8b5cf6" /> Liste des Requêtes Instables
-              </h2>
-              {phvList.length > 0 && <span className="badge" style={{ background: 'rgba(139, 92, 246, 0.15)', color: '#a78bfa' }}>{phvList.length} requêtes</span>}
+            <div>
+              <h1 className="page-title text-gradient" style={{ fontSize: '1.4rem', background: 'linear-gradient(135deg, #7dd3fc, #0ea5e9)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 }}>
+                Analyse des Plans d'Exécution (PHV)
+              </h1>
             </div>
+          </div>
 
-            <div style={{ padding: '0 20px 15px 20px' }}>
-              <div style={{ position: 'relative' }}>
-                <Search size={16} color="#94a3b8" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+             <div style={{ position: 'relative', width: '250px' }}>
+               <select 
+                 value={selectedBase} 
+                 onChange={e => setSelectedBase(e.target.value)} 
+                 style={{ 
+                   paddingLeft: 40, height: 40, width: '100%', 
+                   background: 'rgba(15, 23, 42, 0.6)', border: '1px solid rgba(255,255,255,0.1)', 
+                   borderRadius: '10px', color: '#e2e8f0', appearance: 'none', cursor: 'pointer'
+                 }}>
+                 <option value="" disabled>-- Base --</option>
+                 {bases.map(b => <option key={b.ID} value={b.ID}>{b.Instance} — {b.IP}</option>)}
+               </select>
+               <Database size={16} color="#0ea5e9" style={{ position: 'absolute', left: 14, top: 12, pointerEvents: 'none' }} />
+             </div>
+             
+             <div style={{ position: 'relative', width: '300px' }}>
+                <Search size={16} color="#94a3b8" style={{ position: 'absolute', left: 12, top: 12, pointerEvents: 'none' }} />
                 <input 
                   type="text"
-                  placeholder="Rechercher un SQL ID..."
+                  placeholder="Rechercher SQL ID..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px 10px 38px',
-                    background: 'rgba(15, 23, 42, 0.4)',
-                    border: '1px solid rgba(139, 92, 246, 0.2)',
-                    borderRadius: '10px',
-                    color: '#f8fafc',
-                    fontSize: '0.85rem',
-                    outline: 'none',
-                    transition: 'all 0.2s',
-                    boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)'
-                  }}
-                  onFocus={(e) => e.target.style.borderColor = 'rgba(139, 92, 246, 0.5)'}
-                  onBlur={(e) => e.target.style.borderColor = 'rgba(139, 92, 246, 0.2)'}
+                  style={{ width: '100%', padding: '10px 12px 10px 38px', background: 'rgba(15, 23, 42, 0.4)', border: '1px solid rgba(139, 92, 246, 0.2)', borderRadius: '10px', color: '#f8fafc', fontSize: '0.85rem' }}
                 />
-              </div>
-            </div>
-
-            {loadingList ? (
-              <div style={{ padding: '40px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px' }}>
-                <Loader2 size={30} className="spinner" color="#0ea5e9" />
-                <span style={{ color: '#94a3b8' }}>Analyse en cours...</span>
-              </div>
-            ) : phvList.length === 0 ? (
-              <div style={{ padding: '30px', textAlign: 'center', color: '#64748b', fontSize: '0.9rem' }}>
-                Aucune requête avec de multiples plans trouvée sur cette instance.
-              </div>
-            ) : phvList.filter(row => (row.SQL_ID || row.sql_id || "").toLowerCase().includes(searchTerm.toLowerCase())).length === 0 ? (
-              <div style={{ padding: '30px', textAlign: 'center', color: '#94a3b8', fontSize: '0.9rem', fontStyle: 'italic' }}>
-                Aucun SQL ID trouvé pour "{searchTerm}".
-              </div>
-            ) : (
-              <div style={{ overflowX: 'auto', maxHeight: '500px' }}>
-                <table className="og-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                  <thead style={{ position: 'sticky', top: 0, background: 'rgba(15, 23, 42, 0.95)', zIndex: 10, backdropFilter: 'blur(5px)' }}>
-                    <tr>
-                      <th style={{ padding: '12px 16px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>SQL_ID</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'center', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Nb PHV</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Plans Disponibles</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {phvList
-                      .filter(row => (row.SQL_ID || row.sql_id || "").toLowerCase().includes(searchTerm.toLowerCase()))
-                      .map((row, idx) => {
-                        const sqlId = row.SQL_ID || row.sql_id;
-                      const phvs = (row.PHV_LIST || row.phv_list || "").split(',').map(s => s.trim());
-                      const scriptSql = row.SCRIPT_SQL || row.script_sql;
-                      const isActive = selectedSqlId === sqlId;
-                      const isExpanded = expandedSqlId === sqlId;
-                      
-                      return (
-                        <React.Fragment key={idx}>
-                          <tr style={{ 
-                            borderBottom: isExpanded ? 'none' : '1px solid rgba(255,255,255,0.02)',
-                            background: isActive ? 'rgba(139, 92, 246, 0.05)' : 'transparent',
-                            transition: 'background 0.2s'
-                          }}>
-                            <td style={{ padding: '12px 16px', color: isActive ? '#a78bfa' : '#cbd5e1', fontWeight: isActive ? 600 : 400, fontFamily: "monospace" }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); setExpandedSqlId(isExpanded ? null : sqlId); }}
-                                  style={{ 
-                                    background: isExpanded ? 'rgba(56, 189, 248, 0.2)' : 'rgba(56, 189, 248, 0.1)', 
-                                    border: '1px solid rgba(56, 189, 248, 0.2)', 
-                                    color: '#38bdf8', 
-                                    cursor: 'pointer', 
-                                    padding: '4px', 
-                                    borderRadius: '6px', 
-                                    display: 'flex', 
-                                    alignItems: 'center',
-                                    transition: 'all 0.2s'
-                                  }}
-                                  title="Voir le script SQL"
-                                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(56, 189, 248, 0.3)'}
-                                  onMouseLeave={e => e.currentTarget.style.background = isExpanded ? 'rgba(56, 189, 248, 0.2)' : 'rgba(56, 189, 248, 0.1)'}
-                                >
-                                  {isExpanded ? <ChevronDown size={14} /> : <Code size={14} />}
-                                </button>
-                                {sqlId}
-                              </div>
-                            </td>
-                            <td style={{ padding: '12px 16px', textAlign: 'center', color: '#e2e8f0' }}>
-                              <span style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem' }}>
-                                {row.PHV_COUNT || row.phv_count}
-                              </span>
-                            </td>
-                            <td style={{ padding: '10px 16px' }}>
-                              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                                {phvs.map((p, i) => (
-                                  <button
-                                    key={i}
-                                    onClick={() => fetchPlanDetails(sqlId, p)}
-                                    style={{
-                                      border: (selectedSqlId === sqlId && selectedPhv === p) ? '1px solid #38bdf8' : '1px solid rgba(255,255,255,0.1)',
-                                      background: (selectedSqlId === sqlId && selectedPhv === p) ? 'rgba(56, 189, 248, 0.15)' : 'rgba(15, 23, 42, 0.6)',
-                                      color: (selectedSqlId === sqlId && selectedPhv === p) ? '#38bdf8' : '#94a3b8',
-                                      padding: '4px 10px', borderRadius: '6px', fontSize: '0.75rem', cursor: 'pointer', fontFamily: "monospace",
-                                      transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: '4px'
-                                    }}
-                                    onMouseEnter={(e) => {
-                                      if (!(selectedSqlId === sqlId && selectedPhv === p)) {
-                                        e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-                                        e.currentTarget.style.color = '#e2e8f0';
-                                      }
-                                    }}
-                                    onMouseLeave={(e) => {
-                                      if (!(selectedSqlId === sqlId && selectedPhv === p)) {
-                                        e.currentTarget.style.background = 'rgba(15, 23, 42, 0.6)';
-                                        e.currentTarget.style.color = '#94a3b8';
-                                      }
-                                    }}
-                                  >
-                                    <GitBranch size={12} /> {p}
-                                  </button>
-                                ))}
-                              </div>
-                            </td>
-                          </tr>
-                          {isExpanded && (
-                            <tr style={{ background: isActive ? 'rgba(139, 92, 246, 0.05)' : 'transparent' }}>
-                              <td colSpan={3} style={{ padding: '0 16px 16px 16px', borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
-                                <div style={{ 
-                                  background: 'rgba(15, 23, 42, 0.8)', 
-                                  padding: '16px', 
-                                  borderRadius: '8px', 
-                                  border: '1px solid rgba(56, 189, 248, 0.2)', 
-                                  fontSize: '0.8rem', 
-                                  color: '#e2e8f0', 
-                                  fontFamily: 'monospace', 
-                                  whiteSpace: 'pre-wrap', 
-                                  maxHeight: '200px', 
-                                  overflowY: 'auto',
-                                  boxShadow: 'inset 0 0 10px rgba(0,0,0,0.5)'
-                                }}>
-                                  {scriptSql ? scriptSql : <span style={{ color: '#64748b', fontStyle: 'italic' }}>Script SQL non disponible</span>}
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </React.Fragment>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </GlassCard>
+             </div>
+          </div>
         </div>
 
-        {/* COLONNE DROITE : VUE DÉTAIL (ARBRE EXPLAIN PLAN) */}
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          <GlassCard style={{ padding: 0, overflow: 'hidden', height: '100%', minHeight: '600px', display: 'flex', flexDirection: 'column' }}>
-            
-            <div style={{ padding: '20px', borderBottom: '1px solid rgba(255,255,255,0.05)', background: 'rgba(15, 23, 42, 0.5)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h2 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  Aperçu du Plan d'Exécution
-                </h2>
-                {selectedSqlId && selectedPhv && (
-                  <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ color: '#e2e8f0', fontFamily: 'monospace', padding: '2px 6px', background: 'rgba(255,255,255,0.08)', borderRadius: '4px' }}>SQL_ID : {selectedSqlId}</span>
-                    <ChevronRight size={14} />
-                    <span style={{ color: '#38bdf8', fontFamily: 'monospace', padding: '2px 6px', background: 'rgba(56, 189, 248, 0.1)', borderRadius: '4px' }}>PHV : {selectedPhv}</span>
-                  </div>
-                )}
-              </div>
-              
-              <div style={{ display: 'flex', gap: '10px' }}>
-                {selectedSqlId && (
-                  <button 
-                    onClick={handleAnalyzePlans} 
-                    disabled={isAnalyzing}
-                    style={{ 
-                      background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)', 
-                      border: 'none', 
-                      color: 'white', 
-                      padding: '8px 16px', 
-                      borderRadius: '8px', 
-                      cursor: isAnalyzing ? 'wait' : 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      fontSize: '0.9rem',
-                      fontWeight: 600,
-                      opacity: isAnalyzing ? 0.7 : 1,
-                      boxShadow: '0 4px 12px rgba(139, 92, 246, 0.3)'
-                    }}
-                  >
-                    {isAnalyzing ? <Loader2 size={16} className="spinner" /> : <Bot size={16} />}
-                    {isAnalyzing ? "Comparaison en cours par nvidia_senior..." : "Comparer tous les PHVs avec l'IA"}
-                  </button>
-                )}
-                {planDetails && (
-                  <button onClick={() => {setPlanDetails(null); setAiAnalysisResult('');}} style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', padding: '4px' }}>
-                    <X size={20} />
-                  </button>
-                )}
-              </div>
+        {error && <div className="alert alert-error" style={{ marginBottom: 16 }}><AlertCircle size={16} /> {error}</div>}
+
+        {/* LISTE HORIZONTALE DES REQUÊTES */}
+        <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '8px', scrollbarWidth: 'thin' }} className="custom-scrollbar">
+          {loadingList ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#94a3b8', fontSize: '0.9rem' }}>
+              <Loader2 size={16} className="spinner" /> Chargement des requêtes...
             </div>
-
-            <div style={{ flex: 1, padding: planDetails ? 0 : '40px', display: 'flex', flexDirection: 'column', position: 'relative' }}>
-              
-              {loadingDetails ? (
-                <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
-                  <div style={{ padding: '20px', background: 'rgba(15, 23, 42, 0.8)', borderRadius: '16px', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,0.05)' }}>
-                    <Loader2 size={36} className="spinner" color="#38bdf8" />
-                  </div>
-                  <span style={{ color: '#94a3b8', fontWeight: 600 }}>Récupération de l'arbre...</span>
+          ) : phvList.length === 0 ? (
+            <div style={{ color: '#64748b', fontSize: '0.9rem', padding: '10px' }}>Aucune requête instable détectée.</div>
+          ) : phvList.filter(r => (r.SQL_ID || r.sql_id || "").toLowerCase().includes(searchTerm.toLowerCase())).map((row, idx) => {
+            const sqlId = row.SQL_ID || row.sql_id;
+            const isActive = selectedSqlId === sqlId;
+            return (
+              <button
+                key={idx}
+                onClick={() => selectSqlId(row)}
+                style={{
+                  flexShrink: 0,
+                  padding: '10px 20px',
+                  background: isActive ? 'rgba(139, 92, 246, 0.2)' : 'rgba(15, 23, 42, 0.4)',
+                  border: isActive ? '1px solid #a78bfa' : '1px solid rgba(255,255,255,0.05)',
+                  borderRadius: '12px',
+                  color: isActive ? '#a78bfa' : '#cbd5e1',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '4px',
+                  minWidth: '160px',
+                  transition: 'all 0.2s'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', fontWeight: 700, fontFamily: 'monospace' }}>
+                  <History size={14} /> {sqlId}
                 </div>
-              ) : planDetails ? (
-                planDetails.length === 0 ? (
-                   <div style={{ margin: 'auto', textAlign: 'center', color: '#64748b' }}>
-                     Le plan demandé est introuvable (probablement expiré de la `v$sql_plan`).
-                   </div>
-                ) : (
-                  <div style={{ overflowX: 'auto', overflowY: 'auto', flex: 1, height: '100%', background: '#020617' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', minWidth: '800px' }}>
-                      <thead style={{ position: 'sticky', top: 0, background: 'rgba(15, 23, 42, 0.95)', zIndex: 10, backdropFilter: 'blur(5px)' }}>
-                        <tr>
-                          <th style={{ padding: '10px 16px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Operation (Options)</th>
-                          <th style={{ padding: '10px 16px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Object Name</th>
-                          <th style={{ padding: '10px 16px', textAlign: 'right', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Cost</th>
-                          <th style={{ padding: '10px 16px', textAlign: 'right', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Rows</th>
-                          <th style={{ padding: '10px 16px', textAlign: 'right', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Bytes</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {planDetails.map((node, i) => {
-                          const depth = node.depth || 0;
-                          const operation = node.OPERATION || node.operation;
-                          const options = node.OPTIONS || node.options;
-                          const opLabel = options ? `${operation} (${options})` : operation;
-                          
-                          const objName = node.OBJECT_NAME || node.object_name;
-                          const cost = node.COST || node.cost;
-                          const card = node.CARDINALITY || node.cardinality;
-                          const bytes = node.BYTES || node.bytes;
-                          
-                          // Ligne accentuée si c'est un Full Table Scan
-                          const isFTS = opLabel.toUpperCase().includes('FULL');
-                          
-                          return (
-                            <tr key={i} style={{ 
-                                borderBottom: '1px solid rgba(255,255,255,0.02)',
-                                background: isFTS ? 'rgba(239, 68, 68, 0.05)' : 'transparent'
-                            }}>
-                              <td style={{ 
-                                padding: '8px 16px', 
-                                paddingLeft: `${16 + depth * 24}px`, 
-                                color: isFTS ? '#ef4444' : '#e2e8f0',
-                                fontFamily: 'monospace',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '8px'
-                              }}>
-                                {/* Lignes d'arborescence structurelles */}
-                                {depth > 0 && <span style={{ color: 'rgba(255,255,255,0.15)' }}>└─</span>}
-                                {opLabel}
-                              </td>
-                              <td style={{ padding: '8px 16px', color: '#38bdf8', fontWeight: 600 }}>
-                                {objName ? (
-                                  <span 
-                                    onClick={() => { 
-                                      const objType = node.OBJECT_TYPE || node.object_type || '';
-                                      if (objType.toUpperCase().includes('INDEX')) {
-                                        setAutopsyIndex(objName);
-                                        setIsIndexAutopsyOpen(true);
-                                      } else {
-                                        setAutopsyTable(objName); 
-                                        setIsAutopsyOpen(true); 
-                                      }
-                                    }}
-                                    style={{ cursor: 'pointer', borderBottom: '1px dashed rgba(56, 189, 248, 0.5)', transition: 'all 0.2s' }}
-                                    title="Cliquez pour autopsier cet objet"
-                                    onMouseEnter={e => { e.currentTarget.style.color = '#7dd3fc'; e.currentTarget.style.borderBottomColor = '#7dd3fc'; }}
-                                    onMouseLeave={e => { e.currentTarget.style.color = '#38bdf8'; e.currentTarget.style.borderBottomColor = 'rgba(56, 189, 248, 0.5)'; }}
-                                  >
-                                    {objName}
-                                  </span>
-                                ) : '-'}
-                              </td>
-
-                              <td style={{ padding: '8px 16px', textAlign: 'right', color: '#cbd5e1' }}>{cost || '-'}</td>
-                              <td style={{ padding: '8px 16px', textAlign: 'right', color: '#cbd5e1' }}>{card || '-'}</td>
-                              <td style={{ padding: '8px 16px', textAlign: 'right', color: '#cbd5e1' }}>{bytes || '-'}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )
-              ) : (
-                <div style={{ m: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', opacity: 0.5 }}>
-                  <p style={{ color: '#94a3b8', fontSize: '1.2rem', fontWeight: 600 }}>Aucun plan sélectionné</p>
-                  <p style={{ color: '#64748b', fontSize: '0.9rem', maxWidth: '300px', textAlign: 'center', marginTop: '10px' }}>
-                    Cliquez sur un tag PHV dans la liste de gauche pour visualiser son arbre détaillé ici.
-                  </p>
+                <div style={{ fontSize: '0.7rem', color: '#94a3b8', display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                  <span>{row.PHV_COUNT || row.phv_count} plans</span>
+                  <span style={{ color: '#10b981' }}>{row.MAX_ELAPSED || '0'}s max</span>
                 </div>
-              )}
-            </div>
-
-            {/* ZONE IA EN DESSOUS DES PLANS */}
-            {(aiAnalysisResult || isAnalyzing) && (
-              <div style={{ 
-                borderTop: '1px solid rgba(139, 92, 246, 0.3)', 
-                background: 'rgba(15, 23, 42, 0.8)', 
-                padding: '24px',
-                flexShrink: 0,
-                maxHeight: '400px',
-                overflowY: 'auto'
-              }}>
-                <h3 style={{ 
-                  color: '#c4b5fd', 
-                  fontSize: '1.1rem', 
-                  marginBottom: '16px', 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '8px',
-                  fontWeight: 700
-                }}>
-                  <Bot size={20} /> Analyse Experte (nvidia_senior)
-                </h3>
-                {isAnalyzing ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', color: '#a78bfa' }}>
-                    <Loader2 size={20} className="spinner" />
-                    <span>L'architecte analyse la structure du plan, veuillez patienter...</span>
-                  </div>
-                ) : (
-                  <AiResponseViewer content={aiAnalysisResult} />
-                )}
-              </div>
-            )}
-          </GlassCard>
+              </button>
+            );
+          })}
         </div>
-
       </div>
 
-      {/* Drawer pour l'autopsie de table */}
-      <TableAutopsyDrawer 
-        isOpen={isAutopsyOpen} 
-        onClose={() => setIsAutopsyOpen(false)} 
-        tableName={autopsyTable} 
-        idBase={selectedBase} 
-      />
+      {/* ZONE CENTRALE : COMPARAISON DES PLANS (SIDE-BY-SIDE) */}
+      <div style={{ flex: 1, minHeight: '300px', display: 'flex', overflowX: 'auto', background: '#020617', padding: '10px' }} className="custom-scrollbar">
+        {selectedSqlId ? (
+          <div style={{ display: 'flex', gap: '10px', height: '100%', minWidth: '100%', flex: 1 }}>
+            {Object.entries(phvPlans).length === 0 ? (
+               <div style={{ margin: 'auto', color: '#64748b', textAlign: 'center' }}>
+                 <p>Aucun plan d'exécution (PHV) trouvé pour cette requête.</p>
+               </div>
+            ) : (
+              Object.entries(phvPlans).map(([phv, steps], idx) => (
+                <div key={phv} style={{ flex: 1, minWidth: '500px', display: 'flex', flexDirection: 'column' }}>
+                  <GlassCard style={{ padding: 0, height: '100%', display: 'flex', flexDirection: 'column', border: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div style={{ padding: '12px 20px', background: 'rgba(15, 23, 42, 0.8)', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <GitBranch size={16} color="#38bdf8" />
+                        <span style={{ fontWeight: 700, color: '#f8fafc', fontSize: '0.9rem', fontFamily: 'monospace' }}>PHV: {phv}</span>
+                      </div>
+                      {loadingPlans[phv] && <Loader2 size={14} className="spinner" color="#38bdf8" />}
+                    </div>
+                    
+                    <div style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', position: 'relative' }}>
+                      {!steps && loadingPlans[phv] ? (
+                        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                          <Loader2 size={24} className="spinner" color="#38bdf8" />
+                          <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Chargement...</span>
+                        </div>
+                      ) : !steps ? (
+                        <div style={{ padding: '40px', textAlign: 'center', color: '#64748b', fontSize: '0.8rem' }}>
+                          Erreur ou plan introuvable
+                        </div>
+                      ) : (
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
+                          <thead style={{ position: 'sticky', top: 0, background: 'rgba(15, 23, 42, 0.95)', zIndex: 10 }}>
+                            <tr>
+                              <th style={{ padding: '10px 14px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Opération</th>
+                              <th style={{ padding: '10px 14px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Objet</th>
+                              <th style={{ padding: '10px 14px', textAlign: 'right', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Cost</th>
+                              <th style={{ padding: '10px 14px', textAlign: 'right', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Rows</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(steps || []).map((node, i) => {
+                              const depth = node.depth || 0;
+                              const operation = node.OPERATION || node.operation;
+                              const options = node.OPTIONS || node.options;
+                              const opLabel = options ? `${operation} (${options})` : operation;
+                              const isFTS = opLabel.toUpperCase().includes('FULL');
+                              return (
+                                <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)', background: isFTS ? 'rgba(239, 68, 68, 0.05)' : 'transparent' }}>
+                                  <td style={{ padding: '6px 14px', paddingLeft: `${14 + depth * 16}px`, color: isFTS ? '#ef4444' : '#e2e8f0', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                                    {depth > 0 && <span style={{ color: 'rgba(255,255,255,0.1)' }}>└─</span>} {opLabel}
+                                  </td>
+                                  <td style={{ padding: '6px 14px', color: '#38bdf8', fontWeight: 600 }}>
+                                    {node.OBJECT_NAME || node.object_name ? (
+                                      <span 
+                                        onClick={() => {
+                                          const objName = node.OBJECT_NAME || node.object_name;
+                                          const objType = node.OBJECT_TYPE || node.object_type || '';
+                                          if (objType.toUpperCase().includes('INDEX')) { setAutopsyIndex(objName); setIsIndexAutopsyOpen(true); }
+                                          else { setAutopsyTable(objName); setIsAutopsyOpen(true); }
+                                        }}
+                                        style={{ cursor: 'pointer', borderBottom: '1px dashed rgba(56, 189, 248, 0.3)' }}
+                                      >
+                                        {node.OBJECT_NAME || node.object_name}
+                                      </span>
+                                    ) : '-'}
+                                  </td>
+                                  <td style={{ padding: '6px 14px', textAlign: 'right', color: '#94a3b8' }}>{node.COST || node.cost || '-'}</td>
+                                  <td style={{ padding: '6px 14px', textAlign: 'right', color: '#94a3b8' }}>{node.CARDINALITY || node.cardinality || '-'}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  </GlassCard>
+                </div>
+              ))
+            )}
+          </div>
+        ) : (
+          <div style={{ margin: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', opacity: 0.5 }}>
+            <Activity size={80} color="#334155" />
+            <h2 style={{ color: '#94a3b8', marginTop: 20 }}>Sélectionnez une requête pour comparer ses plans</h2>
+            <p style={{ color: '#64748b' }}>Les plans d'exécution seront affichés côte à côte pour une analyse facilitée.</p>
+          </div>
+        )}
+      </div>
 
-      {/* Drawer pour l'autopsie d'index */}
-      <IndexAnalysisDrawer
-        isOpen={isIndexAutopsyOpen}
-        onClose={() => setIsIndexAutopsyOpen(false)}
-        indexName={autopsyIndex}
-        idBase={selectedBase}
-      />
+      {/* RÉSULTAT DE L'ANALYSE IA (VERDICT DE L'EXPERT) */}
+      {(aiAnalysisResult || isAnalyzing) && (
+        <div style={{ 
+          padding: '24px', 
+          background: 'rgba(15, 23, 42, 0.8)', 
+          borderTop: '2px solid #8b5cf6', 
+          minHeight: '200px', 
+          height: 'auto',
+          overflowY: 'auto' 
+        }} className="custom-scrollbar">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+            <Bot size={24} color="#a78bfa" />
+            <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#c4b5fd', fontWeight: 800 }}>Verdict de l'Expert DBA</h3>
+          </div>
+          
+          {isAnalyzing ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', color: '#a78bfa', marginBottom: '10px' }}>
+                <Loader2 size={24} className="spinner" />
+                <span style={{ fontWeight: 600 }}>Analyse en cours par l'IA (nvidia_senior)...</span>
+              </div>
+              <div style={{ height: '15px', width: '100%', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', animation: 'pulse 1.5s infinite' }}></div>
+              <div style={{ height: '15px', width: '90%', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', animation: 'pulse 1.5s infinite' }}></div>
+              <div style={{ height: '15px', width: '95%', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', animation: 'pulse 1.5s infinite' }}></div>
+            </div>
+          ) : (
+            <div style={{ animation: 'fadeIn 0.5s ease-out' }}>
+              <AiResponseViewer content={aiAnalysisResult} />
+            </div>
+          )}
+        </div>
+      )}
 
+      {/* FOOTER : BOUTON AI EXPERT */}
+      <div style={{ padding: '16px 24px', background: 'rgba(15, 23, 42, 0.8)', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
+        <button 
+          onClick={handleAnalyzePlans}
+          disabled={!selectedSqlId || Object.keys(phvPlans).length === 0 || isAnalyzing}
+          style={{ 
+            background: 'linear-gradient(135deg, #8b5cf6, #d946ef)', 
+            border: 'none', 
+            color: 'white', 
+            padding: '12px 30px', 
+            borderRadius: '12px', 
+            cursor: (!selectedSqlId || Object.keys(phvPlans).length === 0 || isAnalyzing) ? 'not-allowed' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            fontSize: '1rem',
+            fontWeight: 700,
+            boxShadow: '0 4px 20px rgba(139, 92, 246, 0.4)',
+            transition: 'all 0.3s',
+            opacity: (!selectedSqlId || Object.keys(phvPlans).length === 0 || isAnalyzing) ? 0.5 : 1
+          }}
+        >
+          {isAnalyzing ? <Loader2 size={22} className="spinner" /> : <Bot size={22} />}
+          {isAnalyzing ? "Analyse en cours..." : "Lancer l'Analyse Comparative IA"}
+        </button>
+      </div>
 
+      {/* DRAWERS D'AUTOPSIE */}
+      <TableAutopsyDrawer isOpen={isAutopsyOpen} onClose={() => setIsAutopsyOpen(false)} tableName={autopsyTable} idBase={selectedBase} />
+      <IndexAnalysisDrawer isOpen={isIndexAutopsyOpen} onClose={() => setIsIndexAutopsyOpen(false)} indexName={autopsyIndex} idBase={selectedBase} />
+      
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar { height: 6px; width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(0,0,0,0.1); }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(56, 189, 248, 0.2); borderRadius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(56, 189, 248, 0.4); }
+        
+        @keyframes pulse {
+          0% { opacity: 0.3; }
+          50% { opacity: 0.6; }
+          100% { opacity: 0.3; }
+        }
+        
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
     </div>
   );
 }

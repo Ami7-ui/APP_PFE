@@ -38,8 +38,19 @@ const useAppStore = create((set) => ({
     auditState: { ...state.auditState, ...newState } 
   })),
 
-  // --- GLOBAL NAVIGATION / APP STATE ---
-  // (Optional: can be used for global notifications, etc.)
+  // --- UI STATE ---
+  isSidebarOpen: localStorage.getItem('og_sidebar_open') !== 'false',
+  toggleSidebar: () => set((state) => {
+    const next = !state.isSidebarOpen;
+    localStorage.setItem('og_sidebar_open', String(next));
+    return { isSidebarOpen: next };
+  }),
+
+  chatbotWidth: parseInt(localStorage.getItem('og_chatbot_width')) || 400,
+  setChatbotWidth: (width) => {
+    localStorage.setItem('og_chatbot_width', String(width));
+    set({ chatbotWidth: width });
+  },
 }));
 
 export default useAppStore;

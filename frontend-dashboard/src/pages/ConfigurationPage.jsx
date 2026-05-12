@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import api from '../api';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import GlassCard from '../components/GlassCard';
-import { Settings2, Database, Play, CheckCircle, Terminal, AlertCircle, Loader2, ChevronDown, ChevronUp, CheckSquare, Square, Search, X, ChevronRight, GitBranch, Bot } from 'lucide-react';
+import { Settings2, Database, Play, CheckCircle, Terminal, AlertCircle, Loader2, ChevronDown, ChevronUp, CheckSquare, Square, Search, X, ChevronRight, GitBranch, Bot, MessageSquare } from 'lucide-react';
 import ChatWidget from '../components/ChatWidget';
 
 /**
@@ -30,6 +30,8 @@ export default function ConfigurationPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const initialAuditId = searchParams.get('auditId');
+
+  const [isChatOpen, setIsChatOpen] = useState(true);
   
   const [bases, setBases] = useState([]);
   const [selectedBase, setSelectedBase] = useState(() => localStorage.getItem('og_dashboard_base') || '');
@@ -235,18 +237,32 @@ export default function ConfigurationPage() {
   };
 
   return (
-    <div style={{ paddingBottom: '60px' }}>
-      <div className="page-header">
-        <div className="page-header-icon" style={{ borderColor: 'rgba(56, 189, 248, 0.3)', background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(14, 165, 233, 0.15))', color: '#38bdf8', boxShadow: 'inset 0 0 20px rgba(56, 189, 248, 0.15)' }}>
-          <Settings2 size={28} />
+    <div style={{ display: 'flex', height: 'calc(100vh - 4px)', overflow: 'hidden', margin: '-20px' }}>
+      {/* SECTION CENTRALE : CONTENU DU DIAGNOSTIC */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '24px', paddingBottom: '80px' }}>
+        <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+            <div className="page-header-icon" style={{ borderColor: 'rgba(56, 189, 248, 0.3)', background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(14, 165, 233, 0.15))', color: '#38bdf8', boxShadow: 'inset 0 0 20px rgba(56, 189, 248, 0.15)' }}>
+              <Settings2 size={28} />
+            </div>
+            <div>
+              <h1 className="page-title text-gradient" style={{ background: 'linear-gradient(135deg, #7dd3fc, #0ea5e9)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 }}>
+                Diagnostic SQL "À la Carte"
+              </h1>
+              <p className="page-subtitle" style={{ margin: 0 }}>Configurez et lancez un audit ciblé</p>
+            </div>
+          </div>
+
+          {!isChatOpen && (
+            <button 
+              onClick={() => setIsChatOpen(true)}
+              className="btn btn-ghost"
+              style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#a78bfa', border: '1px solid rgba(167, 139, 250, 0.3)' }}
+            >
+              <MessageSquare size={18} /> Ouvrir l'Expert IA
+            </button>
+          )}
         </div>
-        <div>
-          <h1 className="page-title text-gradient" style={{ background: 'linear-gradient(135deg, #7dd3fc, #0ea5e9)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-            Diagnostic SQL "À la Carte"
-          </h1>
-          <p className="page-subtitle">Configurez et lancez un audit ciblé en sélectionnant vos métriques</p>
-        </div>
-      </div>
 
       {error && <div className="alert alert-error" style={{ animation: 'slideUp 0.3s', marginBottom: 24 }}><AlertCircle size={18} /> {error}</div>}
 
@@ -644,11 +660,17 @@ export default function ConfigurationPage() {
         </div>
       )}
 
-      {/* CHATBOT IA CONTEXTUEL */}
+      </div>
+
+      {/* SECTION DROITE : CHATBOT (DRAWER) */}
       <ChatWidget 
         context={chatContext} 
         title="Expert DBA Oracle — Diagnostic" 
+        isDrawer={true}
+        isOpen={isChatOpen}
+        onToggle={() => setIsChatOpen(!isChatOpen)}
       />
+
     </div>
   );
 }

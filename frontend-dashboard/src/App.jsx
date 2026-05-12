@@ -77,7 +77,7 @@ export default function App() {
                 <div style={{ height: 4, background: 'linear-gradient(90deg, var(--accent-cyan), var(--accent-purple), var(--accent-emerald))', boxShadow: '0 0 15px var(--glow-purple)', zIndex: 50 }}></div>
                 <div style={{ display: 'flex', flex: 1 }}>
                   <Sidebar user={user} onLogout={handleLogout} />
-                  <main className="page-content" style={{ flex: 1, padding: '20px', background: 'transparent' }}>
+                  <main className="page-content" style={{ flex: 1, padding: '20px', background: 'transparent', transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)', minWidth: 0 }}>
                     <Routes>
                       <Route path="/" element={<DashboardPage user={user} />} />
                       <Route path="/dashboard" element={<Navigate to="/" replace />} />
