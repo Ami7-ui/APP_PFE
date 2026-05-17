@@ -1,18 +1,18 @@
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800;900&family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 :root {
-  /* Thème Twilight Luminous */
-  --bg-main: #020617; /* Slate 950 base */
-  --bg-gradient-1: #1e1b4b; /* Deep Indigo for glow */
-  --bg-gradient-2: #0f172a; /* Slate 900 */
-  --glass-bg: rgba(15, 23, 42, 0.4);
+  /* Thème Dark Mode Pro */
+  --bg-main: #0f172a;
+  --bg-gradient-1: #1e293b;
+  --bg-gradient-2: #0f172a;
+  --glass-bg: #1e293b60;
   --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-border-hover: rgba(255, 255, 255, 0.2);
+  --glass-border-hover: #38bdf840;
   
   --text-main: #f8fafc;
   --text-muted: #94a3b8;
-  --accent-cyan: #22d3ee;
-  --accent-purple: #c084fc;
+  --accent-cyan: #38bdf8;
+  --accent-purple: #818cf8;
   --accent-emerald: #34d399;
   
   --glow-cyan: rgba(34, 211, 238, 0.4);

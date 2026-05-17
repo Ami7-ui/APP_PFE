@@ -238,6 +238,16 @@ def get_audit_workflow_results(id_audit: int):
         raise HTTPException(status_code=404, detail=error)
     return {"id_audit": id_audit, "results": results}
 
+@app.get("/api/audit-results")
+def get_latest_audit_results(id_base: int = Query(...)):
+    """
+    Récupère les derniers résultats d'audit disponibles pour une base spécifique.
+    """
+    results, error = db_functions.get_latest_audit_results(id_base)
+    if error:
+        raise HTTPException(status_code=404, detail=error)
+    return {"results": results}
+
 @app.post("/api/execute_script/{id_base}")
 def execute_sql(id_base: int, req: SqlRequest):
     data, error = db_functions.executer_script_sur_cible(id_base, req.script)

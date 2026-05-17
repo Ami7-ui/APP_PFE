@@ -1951,3 +1951,11 @@ def get_audit_workflow_results(id_audit):
         if conn:
             conn.close()
 
+def get_latest_audit_results(id_base):
+    """
+    Interface pour récupérer les derniers résultats d'audit stockés.
+    """
+    data = get_last_audit_data(id_base)
+    if not data:
+        return None, "Aucun audit trouvé pour cette base dans l'historique."
+    return data, None
