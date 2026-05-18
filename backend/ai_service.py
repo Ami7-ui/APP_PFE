@@ -22,7 +22,7 @@ def get_llama3_junior(context_data: str) -> str:
     ÉTAPE 1 : Le Diagnosticien (Llama 3 Local)
     Fait un constat sans proposer de solutions.
     """
-    system_prompt = """Tu es un DBA Expert Oracle. Ton rôle est d'analyser les résultats du 'Diagnostic SQL' fournis en entrée. 
+    system_prompt = """Tu es un DBA Expert . Ton rôle est d'analyser les résultats du 'Diagnostic SQL' fournis en entrée. 
 
 Consignes strictes :
 1. ANALYSE INSTANTANÉE : Concentre-toi exclusivement sur les données JSON/Textuelles fournies dans le contexte actuel de l'audit. 
@@ -58,7 +58,7 @@ def get_nvidia_senior(diagnostic_text: str, custom_system_prompt: str = None) ->
         api_key="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"
     )
     
-    system_prompt = custom_system_prompt or """Tu es un Architecte DBA Oracle Senior. Voici la liste des anomalies détectées par notre outil de monitoring interne. 
+    system_prompt = custom_system_prompt or """Tu es un Architecte DBA  Senior. Voici la liste des anomalies détectées par notre outil de monitoring interne. 
 Propose des solutions techniques.
 Structure ta réponse OBLIGATOIREMENT ainsi :
 ### 3. SOLUTIONS RECOMMANDÉES
@@ -118,7 +118,7 @@ def analyze_granular_results(granular_data: dict) -> dict:
     
     try:
         # Étape 1 : Junior (Llama 3 Local)
-        system_prompt = """Tu es un DBA Expert Oracle. Ton rôle est d'analyser les résultats du 'Diagnostic SQL' fournis en entrée. 
+        system_prompt = """Tu es un DBA Expert . Ton rôle est d'analyser les résultats du 'Diagnostic SQL' fournis en entrée. 
 
 Consignes strictes :
 1. ANALYSE INSTANTANÉE : Concentre-toi exclusivement sur les données JSON/Textuelles fournies dans le contexte actuel de l'audit. 
@@ -254,7 +254,7 @@ def analyze_phv_plans(query: str, plans: list) -> str:
     Si un seul plan est fourni, explique sa stratégie.
     Si plusieurs plans sont fournis, les compare.
     """
-    system_prompt = """Tu es un expert DBA Oracle Senior. On te fournit une liste de plusieurs plans d'exécution (PHVs) pour un unique SQL_ID. 
+    system_prompt = """Tu es un expert DBA  Senior. On te fournit une liste de plusieurs plans d'exécution (PHVs) pour un unique SQL_ID. 
 Ton objectif est de réaliser une étude comparative pour déterminer quelle stratégie d'exécution est la plus efficace.
 
 RÈGLE DE FORMATAGE OBLIGATOIRE : Lorsque tu génères un tableau comparatif, tu DOIS utiliser la syntaxe Markdown standard ET insérer un véritable retour à la ligne (\\n) après chaque ligne du tableau, y compris après la ligne de séparation (---). Ne génère JAMAIS un tableau sur une seule ligne continue.
@@ -306,3 +306,62 @@ Structure ta réponse ainsi :
             options={'temperature': 0.2}
         )
         return response['message']['content']
+
+def analyze_mysql_performance_with_nemotron(sql_query: str, explain_tabular: list, explain_tree: str) -> str:
+    """
+    Analyse les performances d'une requête MySQL et de ses plans d'explain (Tabulaire & Tree)
+    à l'aide de NVIDIA Nemotron, avec fallback LLaMA 3.
+    """
+    system_prompt = """Tu es un expert DBA MySQL Senior et un Architecte de Performance de premier plan.
+On te fournit une requête SQL MySQL, son plan d'exécution classique (EXPLAIN) et son arbre d'exécution (EXPLAIN FORMAT=TREE).
+Ton objectif est de mener une analyse technique chirurgicale et de fournir des recommandations extrêmement précises pour optimiser cette requête.
+
+RÈGLES DE FORMATAGE ET DE RIGUEUR OBLIGATOIRES :
+1. Analyse l'arbre d'exécution et identifie précisément les goulots d'étranglement (ex: scans de table ALL, tables temporaires induites, opérations de tri filesort).
+2. Fournis des recommandations d'indexation optimales (ex: index composites, index de couverture) avec le code DDL exact 'CREATE INDEX ...'.
+3. Suggère des réécritures de requêtes plus efficaces si nécessaire (ex: remplacer des sous-requêtes par des jointures, optimiser les clauses WHERE).
+4. Ne fais pas de politesse. Reste direct, technique, précis et factuel.
+5. Encadre TOUJOURS les codes SQL, DDL ou arbre par des triples backticks ```sql.
+
+Structure ta réponse OBLIGATOIREMENT selon ce plan :
+### 📊 Analyse du Plan d'Exécution (Tabulaire & Arbre)
+- Analyse de la stratégie choisie par l'optimiseur MySQL (Nested Loop Join, Hash Join, Table Scan, etc.).
+- Évaluation du coût d'exécution et du nombre de lignes traitées/filtrées.
+
+### ⚠️ Goulots d'Étranglement Détectés
+- Liste des opérations coûteuses (ex: `Using filesort`, `Using temporary`, type `ALL`).
+
+### 🛠️ Recommandations d'Indexation (DDL)
+- Proposition d'indexation chirurgicale. RÈGLE ABSOLUE : Fournis le code DDL de création d'index exact.
+
+### 🏆 Requête SQL Optimisée (Réécriture)
+- Proposition de réécriture optimisée de la requête si pertinent, ou conseils de refactoring.
+"""
+
+    # Préparation du contexte utilisateur
+    user_content = f"REQUÊTE SQL MYSQL :\n```sql\n{sql_query}\n```\n\n"
+    
+    user_content += "PLAN D'EXÉCUTION CLASSIQUE (EXPLAIN) :\n"
+    for r in explain_tabular:
+        user_content += f"- Table: {r.get('table') or '-'} | Type: {r.get('type') or '-'} | Key: {r.get('key') or '-'} | Rows: {r.get('rows') or '-'} | Filtered: {r.get('filtered') or '-'}% | Extra: {r.get('Extra') or r.get('extra') or '-'}\n"
+    
+    user_content += f"\nARBRE D'EXÉCUTION GRAPHIQUE (EXPLAIN FORMAT=TREE) :\n```text\n{explain_tree}\n```\n"
+
+    try:
+        return get_nvidia_senior(user_content, custom_system_prompt=system_prompt)
+    except Exception as e:
+        print(f"[WARN] NVIDIA Nemotron a échoué pour l'analyse MySQL ({e}). Utilisation du fallback LLaMA 3 local.")
+        try:
+            import ollama
+            response = ollama.chat(
+                model='llama3',
+                messages=[
+                    {'role': 'system', 'content': system_prompt},
+                    {'role': 'user', 'content': user_content}
+                ],
+                options={'temperature': 0.2}
+            )
+            return response['message']['content']
+        except Exception as e_llama:
+            return f"Impossible de générer l'analyse IA. Erreur : {str(e_llama)}"
+

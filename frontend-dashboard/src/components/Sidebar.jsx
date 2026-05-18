@@ -20,6 +20,7 @@ const NAV_ITEMS = [
   { key: 'assistant-ia',  label: 'Assistant IA',           Icon: Bot,             roles: ['super_admin','admin','consultant','dba'] }, 
   { key: 'reports-history', label: 'Historique Rapports',  Icon: FileText,        roles: ['super_admin','admin','consultant','dba'] },
   { key: 'sql-phv',       label: 'Analyse PHV',            Icon: Activity,        roles: ['super_admin','admin','consultant','dba'] },
+  { key: 'sql-plan-mysql', label: 'Analyse Plan MySQL',   Icon: Activity,        roles: ['super_admin','admin'] },
 ];
 
 export default function Sidebar({ user, onLogout }) {

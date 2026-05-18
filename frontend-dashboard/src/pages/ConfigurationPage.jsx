@@ -220,6 +220,34 @@ export default function ConfigurationPage() {
     }
   }, [selectedBase]);
 
+  // Désélection automatique des scripts non compatibles lors d'un changement de base
+  useEffect(() => {
+    if (!selectedBase || bases.length === 0 || scripts.length === 0) return;
+    
+    // Trouver la base sélectionnée pour connaître son type
+    const currentBase = bases.find(b => String(b.ID) === String(selectedBase));
+    const selectedBaseType = currentBase ? (currentBase.id_type_base || currentBase.ID_TYPE_BASE) : null;
+    
+    if (!selectedBaseType) return;
+    
+    setSelectedScripts(prev => {
+      const filtered = prev.filter(selectedScript => {
+        // Retrouver le script original complet pour vérifier son type de base
+        const origScript = scripts.find(s => String(s.ID || s.id) === String(selectedScript.id));
+        if (!origScript) return true; // Conserver par défaut si non trouvé
+        
+        const scriptBaseType = origScript.id_type_base || origScript.ID_TYPE_BASE;
+        return String(scriptBaseType) === String(selectedBaseType);
+      });
+      
+      // Mettre à jour uniquement si un ou plusieurs scripts ont été filtrés (incompatibles)
+      if (filtered.length !== prev.length) {
+        return filtered;
+      }
+      return prev;
+    });
+  }, [selectedBase, bases, scripts]);
+
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -331,11 +359,22 @@ export default function ConfigurationPage() {
       .finally(() => setLoadingPlan(false));
   };
 
+  // Identification de la base sélectionnée et de son type (Oracle=1, MySQL=21)
+  const currentBase = bases.find(b => String(b.ID) === String(selectedBase));
+  const selectedBaseType = currentBase ? (currentBase.id_type_base || currentBase.ID_TYPE_BASE) : null;
+
+  // Filtrage des scripts selon le type de la base
+  const filteredScripts = scripts.filter(s => {
+    if (!selectedBaseType) return true; // Si aucune base n'est sélectionnée, tout afficher
+    const scriptBaseType = s.id_type_base || s.ID_TYPE_BASE;
+    return String(scriptBaseType) === String(selectedBaseType);
+  });
+
   const categorizedScripts = {
-    "Performance": scripts.filter(s => s.id_type_metrique === 2),
-    "Stockage": scripts.filter(s => s.id_type_metrique === 3),
-    "Requêtes": scripts.filter(s => s.id_type_metrique === 21),
-    "Connexion": scripts.filter(s => s.id_type_metrique === 22)
+    "Performance": filteredScripts.filter(s => s.id_type_metrique === 2),
+    "Stockage": filteredScripts.filter(s => s.id_type_metrique === 3),
+    "Requêtes": filteredScripts.filter(s => s.id_type_metrique === 21),
+    "Connexion": filteredScripts.filter(s => s.id_type_metrique === 22)
   };
 
 

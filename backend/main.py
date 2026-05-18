@@ -88,6 +88,9 @@ class GranularAuditRequest(BaseModel):
     id_base: int
     scripts: List[dict]
 
+class MysqlExplainRequest(BaseModel):
+    sql_query: str
+
 class GranularAIRequest(BaseModel):
     id_base: int
     results: dict
@@ -96,6 +99,11 @@ class PHVAnalysisRequest(BaseModel):
     sql_id: str
     query: str
     plans: List[dict] # Liste des plans d'exécution (chaque plan est une liste d'étapes)
+
+class MysqlPlanAnalysisRequest(BaseModel):
+    query: str
+    explain_tabular: List[dict]
+    explain_tree: str
 
 class AuditRunRequest(BaseModel):
     id_base: int
@@ -254,6 +262,18 @@ def execute_sql(id_base: int, req: SqlRequest):
     if error: raise HTTPException(status_code=400, detail=error)
     return {"data": data}
 
+@app.get("/api/mysql/queries/{id_base}")
+def get_mysql_queries(id_base: int):
+    data, err = db_functions.get_mysql_expensive_queries(id_base)
+    if err: raise HTTPException(status_code=400, detail=err)
+    return {"data": data}
+
+@app.post("/api/mysql/explain/{id_base}")
+def get_mysql_explain(id_base: int, req: MysqlExplainRequest):
+    data, err = db_functions.get_mysql_explain(id_base, req.sql_query)
+    if err: raise HTTPException(status_code=400, detail=err)
+    return data
+
 @app.get("/api/diagnostics/plan/{id_base}/{sql_id}")
 async def get_execution_plan(id_base: int, sql_id: str):
     plan_data, error = db_functions.get_sql_plan_by_id(id_base, sql_id)
@@ -405,6 +425,14 @@ async def analyze_granular(req: GranularAIRequest):
 async def analyze_phv(req: PHVAnalysisRequest):
     try:
         analysis = ai_service.analyze_phv_plans(req.query, req.plans)
+        return {"analysis": analysis}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/ai/analyze-plan-mysql")
+async def analyze_plan_mysql(req: MysqlPlanAnalysisRequest):
+    try:
+        analysis = ai_service.analyze_mysql_performance_with_nemotron(req.query, req.explain_tabular, req.explain_tree)
         return {"analysis": analysis}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

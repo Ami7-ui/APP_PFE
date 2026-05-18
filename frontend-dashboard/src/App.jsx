@@ -12,6 +12,7 @@ import UsersPage from './pages/UsersPage';
 import AiAssistantPage from './pages/AiAssistantPage'; 
 import ReportsHistoryPage from './pages/ReportsHistoryPage';
 import SqlPhvPage from './pages/SqlPhvPage';
+import AnalysePlanMysqlPage from './pages/AnalysePlanMysqlPage';
 import useAppStore from './store/useAppStore';
 
 const queryClient = new QueryClient({
@@ -88,6 +89,7 @@ export default function App() {
                       <Route path="/assistant-ia" element={<AiAssistantPage user={user} />} />
                       <Route path="/reports-history" element={<ReportsHistoryPage user={user} />} />
                       <Route path="/sql-phv" element={<SqlPhvPage user={user} />} />
+                      <Route path="/sql-plan-mysql" element={<AnalysePlanMysqlPage user={user} />} />
                     </Routes>
                   </main>
                 </div>
