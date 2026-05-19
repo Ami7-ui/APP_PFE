@@ -57,7 +57,7 @@ def get_all_utilisateurs():
             ORDER BY u.NOM_COMPLET
         """
         cursor.execute(sql)
-        return [{"ID": r[0], "Nom": r[1], "Email": r[2], "Rôle": r[3], "id_role": r[4]} for r in cursor.fetchall()]
+        return [{"ID": r[0], "Nom": r[1], "Identifiant": r[1], "Email": r[2], "Rôle": r[3], "Role": r[3], "id_role": r[4]} for r in cursor.fetchall()]
     finally:
         if 'cursor' in locals(): cursor.close()
 
@@ -70,29 +70,35 @@ def ajouter_utilisateur(nom, email, mdp, id_role):
         conn.commit()
         return True, "Utilisateur créé !"
     except Exception as e: return False, str(e)
+    finally:
+        if 'cursor' in locals(): cursor.close()
 
 def modifier_utilisateur(id_user, nom, email, id_role, mdp=None):
     conn = get_oracle_connection()
     try:
         cursor = conn.cursor()
         if mdp:
-            sql = "UPDATE UTILISATEUR SET nom_complet=:n, email=:e, id_role=:r, mot_de_passe=:m WHERE id_utilisateur=:id"
+            sql = "UPDATE UTILISATEUR SET nom_complet=:n, email=:e, id_role=:r, mot_de_passe=:m WHERE ID_USER=:id"
             cursor.execute(sql, n=nom, e=email, r=id_role, m=mdp, id=id_user)
         else:
-            sql = "UPDATE UTILISATEUR SET nom_complet=:n, email=:e, id_role=:r WHERE id_utilisateur=:id"
+            sql = "UPDATE UTILISATEUR SET nom_complet=:n, email=:e, id_role=:r WHERE ID_USER=:id"
             cursor.execute(sql, n=nom, e=email, r=id_role, id=id_user)
         conn.commit()
         return True, "Mis à jour avec succès"
     except Exception as e: return False, str(e)
+    finally:
+        if 'cursor' in locals(): cursor.close()
 
 def supprimer_utilisateur(id_user):
     conn = get_oracle_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM UTILISATEUR WHERE id_utilisateur = :id", id=id_user)
+        cursor.execute("DELETE FROM UTILISATEUR WHERE ID_USER = :id", id=id_user)
         conn.commit()
         return True, "Supprimé"
     except Exception as e: return False, str(e)
+    finally:
+        if 'cursor' in locals(): cursor.close()
 
 # ==========================================
 # 2. GESTION DES BASES CIBLES & TYPES

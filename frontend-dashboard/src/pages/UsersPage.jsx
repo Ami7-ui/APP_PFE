@@ -5,12 +5,14 @@ import { Users, UserPlus, Fingerprint, Shield, Edit2, Trash2, Mail, Save, X, Plu
 
 export default function UsersPage() {
   const [users, setUsers]   = useState([]);
-  const [form, setForm]     = useState({ Nom_Domaine:'', Nom_utilisateur:'', identifiant:'', password:'', confirmation:'', role:'consultant', email:'' });
+  const [roles, setRoles]   = useState([]);
+  const [form, setForm]     = useState({ Nom_Domaine:'', Nom_utilisateur:'', identifiant:'', password:'', confirmation:'', role:'consultant', id_role: 3, email:'' });
   const [editId, setEditId] = useState(null);
   const [error, setError]   = useState('');
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); loadRoles(); }, []);
   const load = () => api.get('/api/users').then(r => setUsers(r.data));
+  const loadRoles = () => api.get('/api/roles').then(r => setRoles(r.data)).catch(() => {});
 
   const save = async (e) => {
     e.preventDefault(); setError('');
@@ -18,7 +20,7 @@ export default function UsersPage() {
     try {
       if(editId) await api.put(`/api/users/${editId}`, form);
       else await api.post('/api/users', form);
-      setForm({ Nom_Domaine:'', Nom_utilisateur:'', identifiant:'', password:'', confirmation:'', role:'consultant', email:'' });
+      setForm({ Nom_Domaine:'', Nom_utilisateur:'', identifiant:'', password:'', confirmation:'', role:'consultant', id_role: 3, email:'' });
       setEditId(null);
       load();
     } catch { setError("Erreur de sauvegarde."); }
@@ -61,7 +63,12 @@ export default function UsersPage() {
                   <div>
                     <div style={{ fontWeight: 700, color: '#f8fafc', fontSize: '1rem', marginBottom: 4 }}>{u.Identifiant}</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span className={`badge ${u.Role === 'super_admin' ? 'badge-red' : u.Role === 'admin' ? 'badge-yellow' : u.Role === 'dba' ? 'badge-green' : 'badge-blue'}`}>
+                      <span className={`badge ${
+                        u.Role === 'super_admin' ? 'badge-red' :
+                        u.Role === 'admin' ? 'badge-yellow' :
+                        u.Role === 'consultant' ? 'badge-blue' :
+                        u.Role === 'simple_user' ? 'badge-purple' : 'badge-green'
+                      }`}>
                         {u.Role}
                       </span>
                       {u.Email && <span style={{ fontSize: '0.75rem', color: '#64748b' }}><Mail size={12} style={{ verticalAlign: 'middle', marginRight: 4 }}/>{u.Email}</span>}
@@ -69,7 +76,19 @@ export default function UsersPage() {
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-ghost btn-sm" onClick={() => { setEditId(u.ID); setForm({...u, identifiant: u.Identifiant, password:'', confirmation:'', role: u.Role}); }} style={{ padding: 8 }}><Edit2 size={16}/></button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => {
+                    setEditId(u.ID);
+                    setForm({
+                      Nom_Domaine: u.Nom_Domaine || '',
+                      Nom_utilisateur: u.Nom || '',
+                      identifiant: u.Identifiant || '',
+                      password: '',
+                      confirmation: '',
+                      role: u.Role || 'consultant',
+                      id_role: u.id_role || 3,
+                      email: u.Email || ''
+                    });
+                  }} style={{ padding: 8 }}><Edit2 size={16}/></button>
                   <button className="btn btn-danger btn-sm" onClick={() => rm(u.ID)} style={{ padding: 8 }}><Trash2 size={16}/></button>
                 </div>
               </div>
@@ -92,11 +111,28 @@ export default function UsersPage() {
             <div className="form-grid-2">
               <div className="form-group">
                 <label className="form-label">Rôle d'Accès</label>
-                <select value={form.role} onChange={e=>setForm({...form,role:e.target.value})} required>
-                  <option value="super_admin">Super Administrateur</option>
-                  <option value="admin">Administrateur</option>
-                  <option value="dba">DBA</option>
-                  <option value="consultant">Consultant</option>
+                <select 
+                  value={form.role} 
+                  onChange={e => {
+                    const selectedRoleName = e.target.value;
+                    const selectedRole = roles.find(r => r.nom === selectedRoleName);
+                    setForm({
+                      ...form,
+                      role: selectedRoleName,
+                      id_role: selectedRole ? selectedRole.id : undefined
+                    });
+                  }} 
+                  required
+                >
+                  <option value="">-- Sélectionner un rôle --</option>
+                  {roles.map(r => (
+                    <option key={r.id} value={r.nom}>
+                      {r.nom === 'super_admin' ? 'Super Administrateur' :
+                       r.nom === 'admin' ? 'Administrateur' :
+                       r.nom === 'consultant' ? 'Consultant' :
+                       r.nom === 'simple_user' ? 'Utilisateur Simple' : r.nom}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div className="form-group"><label className="form-label">Email Professionnel</label><input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} /></div>
@@ -117,7 +153,7 @@ export default function UsersPage() {
               <button type="submit" className="btn btn-primary" style={{ flex: 1, background: 'linear-gradient(135deg, #f59e0b, #d97706)' }}>
                 {editId ? <><Save size={16}/> Mettre à jour</> : <><Plus size={16}/> Créer le compte</>}
               </button>
-              {editId && <button type="button" className="btn btn-ghost" onClick={() => { setEditId(null); setForm({ Nom_Domaine:'', Nom_utilisateur:'', identifiant:'', password:'', confirmation:'', role:'consultant', email:'' }); }}><X size={16}/></button>}
+              {editId && <button type="button" className="btn btn-ghost" onClick={() => { setEditId(null); setForm({ Nom_Domaine:'', Nom_utilisateur:'', identifiant:'', password:'', confirmation:'', role:'consultant', id_role: 3, email:'' }); }}><X size={16}/></button>}
             </div>
           </form>
         </GlassCard>

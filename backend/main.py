@@ -34,10 +34,15 @@ class LoginRequest(BaseModel):
     password: str
 
 class UserRequest(BaseModel):
-    nom: str
+    nom: Optional[str] = None
     email: str
     password: Optional[str] = None
-    id_role: int
+    id_role: Optional[int] = None
+    
+    # Prise en charge des clés du frontend
+    identifiant: Optional[str] = None
+    Nom_utilisateur: Optional[str] = None
+    role: Optional[str] = None
 
 class BaseCibleRequest(BaseModel):
     nom: str
@@ -130,15 +135,73 @@ def list_users():
 
 @app.post("/api/users")
 def add_user(req: UserRequest):
+    # 1. Résoudre le nom d'utilisateur
+    nom_resolu = req.nom or req.Nom_utilisateur or req.identifiant
+    if not nom_resolu:
+        raise HTTPException(status_code=400, detail="Le nom ou identifiant de l'utilisateur est obligatoire")
+        
+    # 2. Résoudre le mot de passe
     if not req.password:
         raise HTTPException(status_code=400, detail="Mot de passe obligatoire")
-    ok, msg = db_functions.ajouter_utilisateur(req.nom, req.email, req.password, req.id_role)
+        
+    # 3. Résoudre l'id_role
+    role_id_resolu = req.id_role
+    if not role_id_resolu and req.role:
+        try:
+            roles_db = db_functions.get_roles()
+            for r in roles_db:
+                if r["nom"].lower() == req.role.lower():
+                    role_id_resolu = r["id"]
+                    break
+        except Exception:
+            pass
+        if not role_id_resolu:
+            role_map = {
+                "super_admin": 1,
+                "admin": 2,
+                "consultant": 3,
+                "dba": 3,
+                "simple_user": 4
+            }
+            role_id_resolu = role_map.get(req.role.lower(), 3)
+    if not role_id_resolu:
+        role_id_resolu = 3 # consultant par défaut
+        
+    ok, msg = db_functions.ajouter_utilisateur(nom_resolu, req.email, req.password, role_id_resolu)
     if not ok: raise HTTPException(status_code=400, detail=msg)
     return {"message": msg}
 
 @app.put("/api/users/{user_id}")
 def update_user(user_id: int, req: UserRequest):
-    ok, msg = db_functions.modifier_utilisateur(user_id, req.nom, req.email, req.id_role, req.password or None)
+    # 1. Résoudre le nom d'utilisateur
+    nom_resolu = req.nom or req.Nom_utilisateur or req.identifiant
+    if not nom_resolu:
+        raise HTTPException(status_code=400, detail="Le nom ou identifiant de l'utilisateur est obligatoire")
+        
+    # 2. Résoudre l'id_role
+    role_id_resolu = req.id_role
+    if not role_id_resolu and req.role:
+        try:
+            roles_db = db_functions.get_roles()
+            for r in roles_db:
+                if r["nom"].lower() == req.role.lower():
+                    role_id_resolu = r["id"]
+                    break
+        except Exception:
+            pass
+        if not role_id_resolu:
+            role_map = {
+                "super_admin": 1,
+                "admin": 2,
+                "consultant": 3,
+                "dba": 3,
+                "simple_user": 4
+            }
+            role_id_resolu = role_map.get(req.role.lower(), 3)
+    if not role_id_resolu:
+        role_id_resolu = 3
+        
+    ok, msg = db_functions.modifier_utilisateur(user_id, nom_resolu, req.email, role_id_resolu, req.password or None)
     if not ok: raise HTTPException(status_code=400, detail=msg)
     return {"message": msg}
 

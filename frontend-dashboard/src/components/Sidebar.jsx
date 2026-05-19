@@ -5,14 +5,14 @@ import { LayoutDashboard, Settings, Database, Code, Users, LogOut, Shield, Bot, 
 import useAppStore from '../store/useAppStore';
 
 const ROLE_COLORS = {
-  super_admin: '#ef4444', admin: '#f59e0b', consultant: '#0ea5e9', dba: '#10b981'
+  super_admin: '#ef4444', admin: '#f59e0b', consultant: '#0ea5e9', dba: '#10b981', simple_user: '#818cf8'
 };
 const ROLE_LABELS = {
-  super_admin: 'SUP. ADMIN', admin: 'ADMIN', consultant: 'CONSULTANT', dba: 'DBA'
+  super_admin: 'SUP. ADMIN', admin: 'ADMIN', consultant: 'CONSULTANT', dba: 'DBA', simple_user: 'UTILISATEUR SIMPLE'
 };
 
 const NAV_ITEMS = [
-  { key: '',              label: 'Tableau de Bord',      Icon: LayoutDashboard, roles: ['super_admin','admin','consultant','dba'] },
+  { key: '',              label: 'Tableau de Bord',      Icon: LayoutDashboard, roles: ['super_admin','admin','consultant','dba','simple_user'] },
   { key: 'configuration', label: 'Diagnostics SQL',        Icon: Settings,        roles: ['super_admin','admin'] },
   { key: 'cibles',        label: 'Bases Cibles',           Icon: Database,        roles: ['super_admin','admin'] },
   { key: 'scripts',       label: 'Scripts Métriques',      Icon: Code,            roles: ['super_admin'] },
