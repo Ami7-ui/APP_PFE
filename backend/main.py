@@ -299,6 +299,13 @@ def start_audit_workflow(req: AuditRunRequest):
         raise HTTPException(status_code=500, detail=error)
     return {"id_audit": id_audit}
 
+@app.get("/api/audits/history/{id_base}")
+def get_audit_history(id_base: int):
+    history, error = db_functions.get_audit_history(id_base)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    return history
+
 @app.get("/api/audit/results/{id_audit}")
 def get_audit_workflow_results(id_audit: int):
     """

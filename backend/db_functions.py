@@ -645,16 +645,63 @@ def get_sql_phvs_for_id(id_base, sql_id):
         return [], None
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT DISTINCT plan_hash_value FROM v$sql_plan WHERE sql_id = :1 AND plan_hash_value <> 0", (sql_id,))
-        phvs = [str(r[0]) for r in cursor.fetchall() if r[0]]
-        if not phvs:
+        sql_vsql = """
+            SELECT 
+                plan_hash_value AS phv,
+                MAX(optimizer_cost) AS cost,
+                ROUND(SUM(cpu_time) / NULLIF(SUM(executions), 0) / 1000, 2) AS cpu_per_exec_ms,
+                ROUND(SUM(elapsed_time) / NULLIF(SUM(executions), 0) / 1000, 2) AS time_per_exec_ms,
+                ROUND(SUM(sorts) / NULLIF(SUM(executions), 0), 2) AS sorts_per_exec,
+                MAX(concurrency_wait_time + user_io_wait_time) AS wait_time
+            FROM v$sql
+            WHERE sql_id = :1 AND plan_hash_value <> 0
+            GROUP BY plan_hash_value
+        """
+        cursor.execute(sql_vsql, [sql_id])
+        rows = cursor.fetchall()
+        
+        phv_data = []
+        for r in rows:
+            wait_time = r[5] or 0
+            phv_data.append({
+                "phv": str(r[0]),
+                "cost": r[1] or 0,
+                "cpu_per_exec": f"{r[2] or 0} ms",
+                "time_per_exec": f"{r[3] or 0} ms",
+                "wait_events": f"{wait_time} ms IO/Sync" if wait_time > 0 else "-",
+                "sorts": str(r[4] or 0)
+            })
+
+        if not phv_data:
+            sql_awr = """
+                SELECT 
+                    plan_hash_value AS phv,
+                    MAX(optimizer_cost) AS cost,
+                    ROUND(SUM(cpu_time_delta) / NULLIF(SUM(executions_delta), 0) / 1000, 2) AS cpu_per_exec_ms,
+                    ROUND(SUM(elapsed_time_delta) / NULLIF(SUM(executions_delta), 0) / 1000, 2) AS time_per_exec_ms,
+                    ROUND(SUM(sorts_delta) / NULLIF(SUM(executions_delta), 0), 2) AS sorts_per_exec,
+                    MAX(iowait_delta + ccwait_delta) AS wait_time
+                FROM dba_hist_sqlstat
+                WHERE sql_id = :1 AND plan_hash_value <> 0
+                GROUP BY plan_hash_value
+            """
             try:
-                cursor.execute("SELECT DISTINCT plan_hash_value FROM dba_hist_sql_plan WHERE sql_id = :1 AND plan_hash_value <> 0", (sql_id,))
-                phvs = [str(r[0]) for r in cursor.fetchall() if r[0]]
+                cursor.execute(sql_awr, [sql_id])
+                for r in cursor.fetchall():
+                    wait_time = r[5] or 0
+                    phv_data.append({
+                        "phv": str(r[0]),
+                        "cost": r[1] or 0,
+                        "cpu_per_exec": f"{r[2] or 0} ms",
+                        "time_per_exec": f"{r[3] or 0} ms",
+                        "wait_events": f"{wait_time} ms IO/Sync" if wait_time > 0 else "-",
+                        "sorts": str(r[4] or 0)
+                    })
             except Exception:
                 pass
+                
         conn.close()
-        return phvs, None
+        return phv_data, None
     except Exception as e:
         if conn: conn.close()
         return None, str(e)
@@ -1898,6 +1945,42 @@ def run_audit_workflow(id_base, scripts_ids=None):
         if 'conn_ref' in locals() and conn_ref:
             try: conn_ref.close()
             except: pass
+
+def get_audit_history(id_base):
+    """
+    Récupère l'historique des audits (ID_AUDIT, DATE_EXECUTION) pour une base spécifique.
+    """
+    conn = get_oracle_connection()
+    if not conn:
+        return [], "Erreur de connexion au référentiel."
+    try:
+        with conn:
+            with conn.cursor() as cursor:
+                # 1. Obtenir le type de base
+                cursor.execute("SELECT ID_TYPE_BASE FROM BASE_CIBLE WHERE ID_BASE = :id", id=id_base)
+                row = cursor.fetchone()
+                if not row:
+                    return [], None
+                id_type_base = row[0]
+                
+                # 2. Obtenir l'historique
+                cursor.execute("""
+                    SELECT ID_AUDIT, MAX(DATE_EXECUTION) as DATE_EXECUTION
+                    FROM AUDIT_RESULTATS
+                    WHERE ID_TYPE_BASE_CIBLE = :t
+                    GROUP BY ID_AUDIT
+                    ORDER BY DATE_EXECUTION DESC
+                """, t=id_type_base)
+                
+                history = []
+                for r in cursor.fetchall():
+                    history.append({
+                        "id": r[0],
+                        "date_audit": r[1].isoformat() if hasattr(r[1], 'isoformat') else str(r[1])
+                    })
+                return history, None
+    except Exception as e:
+        return [], str(e)
 
 def get_audit_workflow_results(id_audit):
     """

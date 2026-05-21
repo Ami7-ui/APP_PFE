@@ -16,6 +16,8 @@ export default function SqlPhvPage() {
   const [selectedSqlId, setSelectedSqlId] = useState(null);
   const [phvPlans, setPhvPlans] = useState({}); // { phv: [steps], ... }
   const [loadingPlans, setLoadingPlans] = useState({}); // { phv: true/false }
+  const [phvMetrics, setPhvMetrics] = useState([]);
+  const [loadingMetrics, setLoadingMetrics] = useState(false);
   const [error, setError] = useState('');
 
   const [isAutopsyOpen, setIsAutopsyOpen] = useState(false);
@@ -36,12 +38,8 @@ export default function SqlPhvPage() {
   const [aiAnalysisResult, setAiAnalysisResult] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  // Redimensionnement du rapport IA
-  const [reportHeight, setReportHeight] = useState(() => {
-    const saved = localStorage.getItem('sqlPhvReportHeight');
-    return saved ? parseInt(saved, 10) : 300;
-  });
-  const [isResizing, setIsResizing] = useState(false);
+  // Redimensionnement du rapport IA (réservé pour usage futur)
+  const [reportHeight] = useState(300);
 
   const startResizing = useCallback((e) => {
     e.preventDefault();
@@ -122,24 +120,42 @@ export default function SqlPhvPage() {
     const sqlId = row.SQL_ID || row.sql_id;
     setSelectedSqlId(sqlId);
     setAiAnalysisResult('');
+    setPhvPlans({});
+    setLoadingPlans({});
+    setPhvMetrics([]);
+    setLoadingMetrics(true);
     
-    // Initialiser les conteneurs de plans pour afficher les colonnes immédiatement
-    const phvString = row.PHV_LIST || row.phv_list || "";
-    const phvs = phvString.split(',').map(s => s.trim()).filter(Boolean);
-    
-    const initialPlans = {};
-    const initialLoading = {};
-    phvs.forEach(p => {
-      initialPlans[p] = null; 
-      initialLoading[p] = true;
-    });
-    
-    setPhvPlans(initialPlans);
-    setLoadingPlans(initialLoading);
-    
-    phvs.forEach(phv => {
-      loadPlan(sqlId, phv);
-    });
+    // Fetch PHV metrics first
+    api.get(`/api/sql-phvs/${selectedBase}/${sqlId}`)
+      .then(r => {
+        const data = r.data.phvs || [];
+        // `data` is an array of objects: { phv, cost, cpu_per_exec, time_per_exec, wait_events, sorts }
+        // If it's old format (array of strings), convert it to objects
+        const metrics = data.map(p => typeof p === 'string' ? { phv: p } : p);
+        setPhvMetrics(metrics);
+        
+        const phvs = metrics.map(m => m.phv);
+        
+        const initialPlans = {};
+        const initialLoading = {};
+        phvs.forEach(p => {
+          initialPlans[p] = null; 
+          initialLoading[p] = true;
+        });
+        
+        setPhvPlans(initialPlans);
+        setLoadingPlans(initialLoading);
+        
+        phvs.forEach(phv => {
+          loadPlan(sqlId, phv);
+        });
+      })
+      .catch(err => {
+        console.error("Error loading PHV metrics:", err);
+      })
+      .finally(() => {
+        setLoadingMetrics(false);
+      });
   };
 
   const loadPlan = (sqlId, phv) => {
@@ -356,113 +372,175 @@ export default function SqlPhvPage() {
       >
         {selectedSqlId ? (
           <>
-            {/* PANNEAU HAUT : PLANS PHV */}
+            {/* PANNEAU HAUT : TABLEAU METRIQUES + PLANS PHV */}
             <div style={{ 
               height: fullscreenPhv ? '100%' : `${panelSplitRatio}%`, 
               minHeight: fullscreenPhv ? '100%' : '100px',
               display: 'flex', 
-              overflowX: 'auto', 
-              padding: '12px',
+              flexDirection: 'column',
+              overflow: 'hidden',
               transition: isDraggingSplitter ? 'none' : 'height 0.3s ease',
               zIndex: fullscreenPhv ? 50 : 1
-            }} className="custom-scrollbar">
-              <div style={{ display: 'flex', gap: '12px', height: '100%', minWidth: '100%', flex: 1 }}>
-                {Object.entries(phvPlans).length === 0 ? (
-                   <div style={{ margin: 'auto', color: '#64748b', textAlign: 'center' }}>
-                     <p>Aucun plan d'exécution (PHV) trouvé pour cette requête.</p>
-                   </div>
-                ) : (
-                  Object.entries(phvPlans)
-                    .filter(([phv]) => !fullscreenPhv || phv === fullscreenPhv)
-                    .map(([phv, steps]) => (
-                    <div key={phv} style={{ flex: 1, minWidth: fullscreenPhv ? '100%' : '550px', display: 'flex', flexDirection: 'column' }}>
-                      <GlassCard style={{ padding: 0, height: '100%', display: 'flex', flexDirection: 'column', border: '1px solid rgba(255,255,255,0.05)', overflow: 'hidden' }}>
-                        <div style={{ padding: '10px 16px', background: 'rgba(15, 23, 42, 0.8)', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <GitBranch size={16} color="#38bdf8" />
-                            <span style={{ fontWeight: 700, color: '#f8fafc', fontSize: '0.85rem', fontFamily: 'monospace' }}>PHV: {phv}</span>
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            {loadingPlans[phv] && <Loader2 size={14} className="spinner" color="#38bdf8" />}
-                            <button 
-                              onClick={() => setFullscreenPhv(fullscreenPhv === phv ? null : phv)}
-                              style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '4px' }}
-                              title="Plein écran"
-                            >
-                              {fullscreenPhv === phv ? <X size={16} /> : <LayoutList size={16} />}
-                            </button>
-                          </div>
-                        </div>
-                        
-                        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', position: 'relative' }}>
-                          {!steps && loadingPlans[phv] ? (
-                            <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-                              <Loader2 size={24} className="spinner" color="#38bdf8" />
-                              <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Chargement...</span>
-                            </div>
-                          ) : !steps ? (
-                            <div style={{ padding: '40px', textAlign: 'center', color: '#64748b', fontSize: '0.8rem' }}>
-                              Erreur ou plan introuvable
-                            </div>
-                          ) : (
-                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
-                              <thead style={{ position: 'sticky', top: 0, background: 'rgba(15, 23, 42, 0.95)', zIndex: 10 }}>
-                                <tr>
-                                  <th style={{ padding: '10px 14px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Opération</th>
-                                  <th style={{ padding: '10px 14px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Objet</th>
-                                  <th style={{ padding: '10px 14px', textAlign: 'right', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Cost</th>
-                                  <th style={{ padding: '10px 14px', textAlign: 'right', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Rows</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {(steps || []).map((node, i) => {
-                                  const depth = node.depth || 0;
-                                  const operation = node.OPERATION || node.operation;
-                                  const options = node.OPTIONS || node.options;
-                                  const opLabel = options ? `${operation} (${options})` : operation;
-                                  const isFTS = opLabel.toUpperCase().includes('FULL');
-                                  return (
-                                    <tr 
-                                      key={i} 
-                                      onMouseEnter={() => setHoveredOperation(operation)}
-                                      onMouseLeave={() => setHoveredOperation(null)}
-                                      style={{ 
-                                        borderBottom: '1px solid rgba(255,255,255,0.02)', 
-                                        background: isFTS ? 'rgba(239, 68, 68, 0.05)' : 'transparent',
-                                        transition: 'background 0.2s'
-                                      }}
-                                    >
-                                      <td style={{ padding: '6px 14px', paddingLeft: `${14 + depth * 16}px`, color: isFTS ? '#ef4444' : '#e2e8f0', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
-                                        {depth > 0 && <span style={{ color: 'rgba(255,255,255,0.1)' }}>└─</span>} {opLabel}
-                                      </td>
-                                      <td style={{ padding: '6px 14px', color: '#38bdf8', fontWeight: 600 }}>
-                                        {node.OBJECT_NAME || node.object_name ? (
-                                          <span 
-                                            onClick={() => {
-                                              const objName = node.OBJECT_NAME || node.object_name;
-                                              const objType = node.OBJECT_TYPE || node.object_type || '';
-                                              if (objType.toUpperCase().includes('INDEX')) { setAutopsyIndex(objName); setIsIndexAutopsyOpen(true); }
-                                              else { setAutopsyTable(objName); setIsAutopsyOpen(true); }
-                                            }}
-                                            style={{ cursor: 'pointer', borderBottom: '1px dashed rgba(56, 189, 248, 0.3)' }}
-                                          >
-                                            {node.OBJECT_NAME || node.object_name}
-                                          </span>
-                                        ) : '-'}
-                                      </td>
-                                      <td style={{ padding: '6px 14px', textAlign: 'right', color: '#94a3b8' }}>{node.COST || node.cost || '-'}</td>
-                                      <td style={{ padding: '6px 14px', textAlign: 'right', color: '#94a3b8' }}>{node.CARDINALITY || node.cardinality || '-'}</td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          )}
-                        </div>
-                      </GlassCard>
+            }}>
+              
+              {/* TABLEAU DES METRIQUES PHV */}
+              {!fullscreenPhv && (
+                <div style={{ padding: '12px 24px', flexShrink: 0 }}>
+                  <GlassCard style={{ padding: 0, overflow: 'hidden', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                    {loadingMetrics ? (
+                      <div style={{ padding: '20px', display: 'flex', justifyContent: 'center', color: '#38bdf8' }}>
+                        <Loader2 className="spinner" size={24} />
+                      </div>
+                    ) : phvMetrics.length > 0 ? (
+                      <div className="custom-scrollbar" style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                          <thead style={{ background: 'rgba(15, 23, 42, 0.95)' }}>
+                            <tr>
+                              <th style={{ padding: '10px 14px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>PHV</th>
+                              <th style={{ padding: '10px 14px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Cost</th>
+                              <th style={{ padding: '10px 14px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>CPU/Exec</th>
+                              <th style={{ padding: '10px 14px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Time (Estimé)</th>
+                              <th style={{ padding: '10px 14px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Wait Events</th>
+                              <th style={{ padding: '10px 14px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Sorts</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {phvMetrics.map((m, i) => (
+                              <tr 
+                                key={i} 
+                                onClick={() => setFullscreenPhv(m.phv)}
+                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(56, 189, 248, 0.07)'}
+                                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                style={{ 
+                                  borderBottom: '1px solid rgba(255,255,255,0.04)', 
+                                  cursor: 'pointer',
+                                  transition: 'background 0.15s',
+                                  background: 'transparent'
+                                }}
+                              >
+                                <td style={{ padding: '8px 14px', color: '#38bdf8', fontWeight: 700, fontFamily: 'monospace' }}>{m.phv}</td>
+                                <td style={{ padding: '8px 14px', color: '#cbd5e1' }}>{m.cost || '-'}</td>
+                                <td style={{ padding: '8px 14px', color: '#a5f3fc' }}>{m.cpu_per_exec || '-'}</td>
+                                <td style={{ padding: '8px 14px', color: '#a5f3fc' }}>{m.time_per_exec || '-'}</td>
+                                <td style={{ padding: '8px 14px', color: m.wait_events && m.wait_events !== '-' ? '#fbbf24' : '#64748b' }}>{m.wait_events || '-'}</td>
+                                <td style={{ padding: '8px 14px', color: '#cbd5e1' }}>{m.sorts || '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div style={{ padding: '16px', color: '#64748b', textAlign: 'center', fontSize: '0.85rem' }}>Aucune métrique de performance disponible.</div>
+                    )}
+                  </GlassCard>
+                </div>
+              )}
+
+              {/* LISTE DES PLANS (CÔTE À CÔTE) */}
+              <div style={{ 
+                flex: 1,
+                display: 'flex', 
+                overflowX: 'auto', 
+                padding: '0 12px 12px 12px'
+              }} className="custom-scrollbar">
+                <div style={{ display: 'flex', gap: '12px', height: '100%', minWidth: '100%', flex: 1 }}>
+                  {Object.entries(phvPlans).length === 0 && !loadingMetrics ? (
+                    <div style={{ margin: 'auto', color: '#64748b', textAlign: 'center' }}>
+                      <p>Aucun plan d'exécution (PHV) trouvé pour cette requête.</p>
                     </div>
-                  ))
-                )}
+                  ) : (
+                    Object.entries(phvPlans)
+                      .filter(([phv]) => !fullscreenPhv || phv === fullscreenPhv)
+                      .map(([phv, steps]) => (
+                        <div key={phv} style={{ flex: 1, minWidth: fullscreenPhv ? '100%' : '550px', display: 'flex', flexDirection: 'column' }}>
+                          <GlassCard style={{ padding: 0, height: '100%', display: 'flex', flexDirection: 'column', border: '1px solid rgba(255,255,255,0.05)', overflow: 'hidden' }}>
+                            <div style={{ padding: '10px 16px', background: 'rgba(15, 23, 42, 0.8)', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                <GitBranch size={16} color="#38bdf8" />
+                                <span style={{ fontWeight: 700, color: '#f8fafc', fontSize: '0.85rem', fontFamily: 'monospace' }}>PHV: {phv}</span>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                {loadingPlans[phv] && <Loader2 size={14} className="spinner" color="#38bdf8" />}
+                                <button 
+                                  onClick={() => setFullscreenPhv(fullscreenPhv === phv ? null : phv)}
+                                  style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '4px' }}
+                                  title="Plein écran"
+                                >
+                                  {fullscreenPhv === phv ? <X size={16} /> : <LayoutList size={16} />}
+                                </button>
+                              </div>
+                            </div>
+                            
+                            <div style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', position: 'relative' }}>
+                              {!steps && loadingPlans[phv] ? (
+                                <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                                  <Loader2 size={24} className="spinner" color="#38bdf8" />
+                                  <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Chargement...</span>
+                                </div>
+                              ) : !steps ? (
+                                <div style={{ padding: '40px', textAlign: 'center', color: '#64748b', fontSize: '0.8rem' }}>
+                                  Erreur ou plan introuvable
+                                </div>
+                              ) : (
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
+                                  <thead style={{ position: 'sticky', top: 0, background: 'rgba(15, 23, 42, 0.95)', zIndex: 10 }}>
+                                    <tr>
+                                      <th style={{ padding: '10px 14px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Opération</th>
+                                      <th style={{ padding: '10px 14px', textAlign: 'left', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Objet</th>
+                                      <th style={{ padding: '10px 14px', textAlign: 'right', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Cost</th>
+                                      <th style={{ padding: '10px 14px', textAlign: 'right', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>Rows</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {(steps || []).map((node, i) => {
+                                      const depth = node.depth || 0;
+                                      const operation = node.OPERATION || node.operation;
+                                      const options = node.OPTIONS || node.options;
+                                      const opLabel = options ? `${operation} (${options})` : operation;
+                                      const isFTS = opLabel.toUpperCase().includes('FULL');
+                                      return (
+                                        <tr 
+                                          key={i} 
+                                          onMouseEnter={() => setHoveredOperation(operation)}
+                                          onMouseLeave={() => setHoveredOperation(null)}
+                                          style={{ 
+                                            borderBottom: '1px solid rgba(255,255,255,0.02)', 
+                                            background: isFTS ? 'rgba(239, 68, 68, 0.05)' : 'transparent',
+                                            transition: 'background 0.2s'
+                                          }}
+                                        >
+                                          <td style={{ padding: '6px 14px', paddingLeft: `${14 + depth * 16}px`, color: isFTS ? '#ef4444' : '#e2e8f0', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                                            {depth > 0 && <span style={{ color: 'rgba(255,255,255,0.1)' }}>└─</span>} {opLabel}
+                                          </td>
+                                          <td style={{ padding: '6px 14px', color: '#38bdf8', fontWeight: 600 }}>
+                                            {node.OBJECT_NAME || node.object_name ? (
+                                              <span 
+                                                onClick={() => {
+                                                  const objName = node.OBJECT_NAME || node.object_name;
+                                                  const objType = node.OBJECT_TYPE || node.object_type || '';
+                                                  if (objType.toUpperCase().includes('INDEX')) { setAutopsyIndex(objName); setIsIndexAutopsyOpen(true); }
+                                                  else { setAutopsyTable(objName); setIsAutopsyOpen(true); }
+                                                }}
+                                                style={{ cursor: 'pointer', borderBottom: '1px dashed rgba(56, 189, 248, 0.3)' }}
+                                              >
+                                                {node.OBJECT_NAME || node.object_name}
+                                              </span>
+                                            ) : '-'}
+                                          </td>
+                                          <td style={{ padding: '6px 14px', textAlign: 'right', color: '#94a3b8' }}>{node.COST || node.cost || '-'}</td>
+                                          <td style={{ padding: '6px 14px', textAlign: 'right', color: '#94a3b8' }}>{node.CARDINALITY || node.cardinality || '-'}</td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              )}
+                            </div>
+                          </GlassCard>
+                        </div>
+                      ))
+                  )}
+                </div>
               </div>
             </div>
 

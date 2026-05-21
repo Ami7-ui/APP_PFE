@@ -161,6 +161,10 @@ export default function ConfigurationPage() {
   const [results, setResults] = useState(null);
   const [error, setError] = useState('');
   
+  const [auditHistory, setAuditHistory] = useState([]);
+  const [selectedAuditId, setSelectedAuditId] = useState('');
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
   const [openDropdown, setOpenDropdown] = useState(null);
   
   // Ref pour fermer le dropdown si on clique en dehors
@@ -209,6 +213,19 @@ export default function ConfigurationPage() {
         .finally(() => setLoading(false));
     }
   }, [initialAuditId]);
+
+  useEffect(() => {
+    if (!selectedBase) {
+      setAuditHistory([]);
+      setSelectedAuditId('');
+      return;
+    }
+    setLoadingHistory(true);
+    api.get(`/api/audits/history/${selectedBase}`)
+      .then(res => setAuditHistory(res.data))
+      .catch(err => console.error(err))
+      .finally(() => setLoadingHistory(false));
+  }, [selectedBase]);
 
   useEffect(() => {
     localStorage.setItem('og_dashboard_metrics', JSON.stringify(selectedScripts));
@@ -295,11 +312,35 @@ export default function ConfigurationPage() {
       const resultsRes = await api.get(`/api/audit/results/${idAudit}`);
       setResults(resultsRes.data.results);
       
+      // Mettre à jour l'historique
+      api.get(`/api/audits/history/${selectedBase}`).then(res => setAuditHistory(res.data));
+      setSelectedAuditId('');
+      
       setOpenDropdown(null);
     } catch (err) { 
       setError(err.response?.data?.detail || "Erreur lors de l'exécution du workflow d'audit."); 
     } finally { 
       setLoading(false); 
+    }
+  };
+
+  const loadOldAudit = async (e) => {
+    const auditId = e.target.value;
+    setSelectedAuditId(auditId);
+    if (!auditId) return;
+    
+    setLoading(true);
+    setError('');
+    setResults(null);
+    
+    try {
+      const resultsRes = await api.get(`/api/audit/results/${auditId}`);
+      setResults(resultsRes.data.results);
+      setOpenDropdown(null);
+    } catch (err) {
+      setError("Impossible de charger l'ancien audit.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -323,7 +364,8 @@ export default function ConfigurationPage() {
 
     api.get(`/api/sql-phvs/${selectedBase}/${sqlId}`)
       .then(r => {
-        setPhvs(r.data.phvs || []);
+        const phvsData = r.data.phvs || [];
+        setPhvs(phvsData.map(p => (typeof p === 'string' ? p : p.phv)));
       })
       .catch(err => {
         setModalError("Erreur lors de la récupération des PHVs.");
@@ -456,6 +498,46 @@ export default function ConfigurationPage() {
                   {bases.map(b => <option key={b.ID} value={b.ID}>{b.Instance} — {b.IP}</option>)}
                 </select>
                 <Database size={18} color="#0ea5e9" style={{ position: 'absolute', left: 16, top: 16, pointerEvents: 'none' }} />
+                <ChevronDown size={16} color="#64748b" style={{ position: 'absolute', right: 16, top: 18, pointerEvents: 'none' }} />
+              </div>
+            </div>
+
+            {/* HISTORIQUE DES AUDITS */}
+            <div style={{ marginBottom: '20px' }}>
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#94a3b8' }}>
+                <Terminal size={14} /> Historique des Audits {loadingHistory && <span style={{fontSize: '0.7rem', color: '#0ea5e9'}}>(Chargement...)</span>}
+              </label>
+              <div style={{ position: 'relative' }}>
+                <select 
+                  value={selectedAuditId} 
+                  onChange={loadOldAudit}
+                  disabled={!selectedBase || auditHistory.length === 0 || loading}
+                  style={{ 
+                    paddingLeft: 44, 
+                    height: 50, 
+                    width: '100%', 
+                    background: (!selectedBase || auditHistory.length === 0 || loading) ? 'rgba(15, 23, 42, 0.4)' : 'rgba(15, 23, 42, 0.6)', 
+                    border: '1px solid rgba(255,255,255,0.1)', 
+                    borderRadius: '12px',
+                    color: '#e2e8f0',
+                    appearance: 'none',
+                    cursor: (!selectedBase || auditHistory.length === 0 || loading) ? 'not-allowed' : 'pointer'
+                  }}>
+                  <option value="">
+                    {auditHistory.length === 0 && selectedBase && !loadingHistory 
+                      ? "Aucun audit précédent" 
+                      : "-- Revoir un ancien audit --"}
+                  </option>
+                  {auditHistory.map(audit => {
+                    const dateObj = new Date(audit.date_audit);
+                    return (
+                      <option key={audit.id} value={audit.id}>
+                        {dateObj.toLocaleString('fr-FR')}
+                      </option>
+                    );
+                  })}
+                </select>
+                <Terminal size={18} color="#0ea5e9" style={{ position: 'absolute', left: 16, top: 16, pointerEvents: 'none', opacity: (!selectedBase || auditHistory.length === 0) ? 0.5 : 1 }} />
                 <ChevronDown size={16} color="#64748b" style={{ position: 'absolute', right: 16, top: 18, pointerEvents: 'none' }} />
               </div>
             </div>
