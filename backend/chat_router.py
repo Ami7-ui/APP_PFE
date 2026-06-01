@@ -4,7 +4,6 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict
 import json
 import datetime
-import ollama
 from openai import OpenAI
 import os
 import asyncio
@@ -60,28 +59,31 @@ def save_message_to_db(conversation_id: str, role: str, content: str, user_id: s
         return False
     try:
         cursor = conn.cursor()
-        
+
         # 1. Vérifier/Créer la conversation
-        cursor.execute("SELECT COUNT(*) FROM CHAT_CONVERSATIONS WHERE CONVERSATION_ID = :id", id=conversation_id)
+        # CORRECTION : On utilise 'ID' (et on aligne le nombre de colonnes/valeurs)
+        cursor.execute("SELECT COUNT(*) FROM CHAT_CONVERSATIONS WHERE ID = :id", id=conversation_id)
         if cursor.fetchone()[0] == 0:
             cursor.execute(
-                "INSERT INTO CHAT_CONVERSATIONS (CONVERSATION_ID, USER_ID, MODULE_TYPE, CREATED_AT) VALUES (:id, :uid, :mod, CURRENT_TIMESTAMP)",
+                "INSERT INTO CHAT_CONVERSATIONS (ID, USER_ID, MODULE_TYPE) VALUES (:id, :uid, :mod)",
                 id=conversation_id, uid=user_id, mod="AUDIT"
             )
-        
-        # 2. Insérer le message (protection JSON cruciale)
-        # On stocke le contenu tel quel ou en JSON ? L'utilisateur demande json.dumps(..., default=str)
-        # Mais si le contenu est déjà du texte, on le wrappe.
+
+        # 2. Insérer le message
+        # Séquence de sérialisation du contenu textuel/JSON
         serialized_content = json.dumps(content, default=str, ensure_ascii=False)
-        
+
+        # CORRECTION : On s'assure que :cid est bien présent ici pour éviter DPY-4008
         sql = """
-            INSERT INTO CHAT_MESSAGES (CONVERSATION_ID, ROLE, CONTENT, CREATED_AT)
-            VALUES (:cid, :role, :content, CURRENT_TIMESTAMP)
+        INSERT INTO CHAT_MESSAGES (CONVERSATION_ID, ROLE, CONTENT, CREATED_AT)
+        VALUES (:cid, :role, :content, CURRENT_TIMESTAMP)
         """
+
         import oracledb
+        # Configuration des types pour le champ CLOB
         cursor.setinputsizes(None, None, oracledb.DB_TYPE_CLOB)
         cursor.execute(sql, cid=conversation_id, role=role, content=serialized_content)
-        
+
         conn.commit()
         return True
     except Exception as e:
@@ -113,28 +115,6 @@ CONSIGNES :
 3. Si un audit affiche '0 LIGNES' ou des valeurs anormales, suggère des causes probables (ex: stats non à jour, manque de droits).
 4. Réponds de manière technique mais concise. Utilise le Markdown pour le code SQL et les tableaux.
 5. Sois factuel et base tes réponses sur les données fournies."""
-
-async def stream_llama3(prompt: str, system_prompt: str, websocket: WebSocket):
-    """Stream LLaMA 3 via Ollama."""
-    try:
-        response = ollama.chat(
-            model='llama3',
-            messages=[
-                {'role': 'system', 'content': system_prompt},
-                {'role': 'user', 'content': prompt}
-            ],
-            stream=True,
-            options={'temperature': 0.3}
-        )
-        full_response = ""
-        for chunk in response:
-            content = chunk['message']['content']
-            full_response += content
-            await websocket.send_json({"type": "chunk", "content": content})
-        return full_response
-    except Exception as e:
-        await websocket.send_json({"type": "error", "content": f"Ollama Error: {str(e)}"})
-        return None
 
 async def stream_nemotron(prompt: str, system_prompt: str, websocket: WebSocket):
     """Stream Nvidia Nemotron Cloud."""
@@ -179,24 +159,14 @@ async def websocket_chat(websocket: WebSocket, user_id: str, conversation_id: st
             # Sauvegarder message utilisateur
             save_message_to_db(conversation_id, "user", user_message, user_id)
             
-            # Routage intelligent
-            # Simple : si la question fait plus de 150 caractères ou demande de l'architecture -> Nemotron
-            if model_choice == "auto":
-                if len(user_message) > 150 or "architecture" in user_message.lower() or "optimisation" in user_message.lower():
-                    selected_model = "nemotron"
-                else:
-                    selected_model = "llama3"
-            else:
-                selected_model = model_choice
+            # Routage : Utilisation exclusive de Nemotron (NVIDIA)
+            selected_model = "nemotron"
             
             await websocket.send_json({"type": "status", "content": f"Assistant utilise {selected_model}..."})
             
             system_prompt = get_system_prompt(context)
             
-            if selected_model == "nemotron":
-                ai_response = await stream_nemotron(user_message, system_prompt, websocket)
-            else:
-                ai_response = await stream_llama3(user_message, system_prompt, websocket)
+            ai_response = await stream_nemotron(user_message, system_prompt, websocket)
                 
             if ai_response:
                 save_message_to_db(conversation_id, "assistant", ai_response, user_id)

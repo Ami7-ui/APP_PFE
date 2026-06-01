@@ -37,7 +37,6 @@ export default function ChatWidget({ context, title = "Expert DBA Oracle", isDra
 
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState("");
-  const [model, setModel] = useState("auto"); // auto, llama3, nemotron
   const [status, setStatus] = useState("connecté"); // connecté, déconnecté, en cours...
   const [isStreaming, setIsStreaming] = useState(false);
   
@@ -93,7 +92,10 @@ export default function ChatWidget({ context, title = "Expert DBA Oracle", isDra
           const lastMsg = prev[prev.length - 1];
           if (lastMsg && lastMsg.role === "assistant") {
             const newMessages = [...prev];
-            newMessages[newMessages.length - 1].content += data.content;
+            newMessages[newMessages.length - 1] = {
+              ...lastMsg,
+              content: lastMsg.content + data.content
+            };
             return newMessages;
           } else {
             return [...prev, { role: "assistant", content: data.content }];
@@ -123,7 +125,7 @@ export default function ChatWidget({ context, title = "Expert DBA Oracle", isDra
       ws.current.send(JSON.stringify({
         message: inputText,
         context: context,
-        model: model
+        model: "nemotron"
       }));
       setInputText("");
     } else {
@@ -189,13 +191,6 @@ export default function ChatWidget({ context, title = "Expert DBA Oracle", isDra
           <button onClick={resetConversation} title="Nouvelle conversation" style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer' }}><RotateCcw size={18} /></button>
           <button onClick={() => setIsOpen(false)} style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer' }}><X size={20} /></button>
         </div>
-      </div>
-
-      {/* Model Selector */}
-      <div style={{ padding: '8px 20px', background: 'rgba(0,0,0,0.2)', display: 'flex', gap: 10, fontSize: '0.75rem' }}>
-         <button onClick={() => setModel("auto")} style={{ color: model === 'auto' ? '#a78bfa' : '#64748b', borderBottom: model === 'auto' ? '2px solid #a78bfa' : 'none', padding: '4px 0', background: 'none', cursor: 'pointer' }}>AUTO</button>
-         <button onClick={() => setModel("llama3")} style={{ color: model === 'llama3' ? '#38bdf8' : '#64748b', borderBottom: model === 'llama3' ? '2px solid #38bdf8' : 'none', padding: '4px 0', background: 'none', cursor: 'pointer' }}>LLAMA 3 (Local)</button>
-         <button onClick={() => setModel("nemotron")} style={{ color: model === 'nemotron' ? '#10b981' : '#64748b', borderBottom: model === 'nemotron' ? '2px solid #10b981' : 'none', padding: '4px 0', background: 'none', cursor: 'pointer' }}>NEMOTRON (Cloud)</button>
       </div>
 
       {/* Messages Area */}

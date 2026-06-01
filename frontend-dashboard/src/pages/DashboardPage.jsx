@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import api from '../api';
 import { Link } from 'react-router-dom';
-import { Activity, RefreshCw, PlugZap, Clock, Target, Settings, Loader2, Cpu, HardDrive, BarChart3, Gauge, Timer, Users, Database, Zap, Grid3X3, AlertCircle } from 'lucide-react';
+import { Activity, RefreshCw, PlugZap, Clock, Target, Settings, Loader2, Cpu, HardDrive, BarChart3, Gauge, Timer, Users, Database, Zap, Grid3X3, AlertCircle, Terminal } from 'lucide-react';
 import {
   DarkCard, THEME, COLORS,
   CpuMemLineChart, TxBarChart, LatencyAreaChart, HistogramChart,
@@ -288,9 +288,34 @@ function DynamicMetricCard({ scriptName, dataArray: rawData }) {
   );
 }
 
-// ── MAIN DASHBOARD PAGE ──────────────────────────────────────────────────────
 export default function DashboardPage() {
   const [selectedBase, setSelectedBase] = useState(() => localStorage.getItem('og_dashboard_base') || '');
+  const [bases, setBases] = useState([]);
+  const [auditHistory, setAuditHistory] = useState([]);
+  const [selectedAuditId, setSelectedAuditId] = useState('');
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+  React.useEffect(() => {
+    api.get('/api/bases').then(r => { 
+      setBases(r.data); 
+      if (r.data.length > 0 && !localStorage.getItem('og_dashboard_base')) setSelectedBase(String(r.data[0].ID)); 
+    }).catch(err => console.error("Erreur de chargement des bases cibles.", err));
+  }, []);
+
+  React.useEffect(() => {
+    if (!selectedBase) {
+      setAuditHistory([]);
+      setSelectedAuditId('');
+      return;
+    }
+    localStorage.setItem('og_dashboard_base', selectedBase);
+    setSelectedAuditId(''); // Reset history selection to fetch latest
+    setLoadingHistory(true);
+    api.get(`/api/audits/history/${selectedBase}`)
+      .then(res => setAuditHistory(res.data))
+      .catch(err => console.error(err))
+      .finally(() => setLoadingHistory(false));
+  }, [selectedBase]);
 
   const { data: statusData } = useQuery({
     queryKey: ['status', selectedBase],
@@ -303,21 +328,25 @@ export default function DashboardPage() {
     refetchInterval: 30000
   });
 
-  // Fetch audit results from the latest audit
   const {
     data: auditResults,
     isFetching: isRefreshing,
     isLoading: isFirstLoading,
     refetch: collect
   } = useQuery({
-    queryKey: ['dashboard_results', selectedBase],
+    queryKey: ['dashboard_results', selectedBase, selectedAuditId],
     queryFn: async () => {
       if (!selectedBase) return null;
-      const response = await api.get(`/api/audit-results?id_base=${selectedBase}`);
-      return response.data.results;
+      if (selectedAuditId) {
+        const response = await api.get(`/api/audit/results/${selectedAuditId}`);
+        return response.data.results;
+      } else {
+        const response = await api.get(`/api/audit-results?id_base=${selectedBase}`);
+        return response.data.results;
+      }
     },
     enabled: !!selectedBase,
-    refetchInterval: 60000 // Refresh every minute
+    refetchInterval: selectedAuditId ? false : 60000 // Refresh every minute only if watching latest
   });
 
   const { data: sessionsDistribution } = useQuery({
@@ -366,6 +395,69 @@ export default function DashboardPage() {
           </button>
         )}
       </div>
+
+      {/* BANDEAU DE CONFIGURATION */}
+      <DarkCard style={{ marginBottom: 24 }}>
+        <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
+          {/* SELECTEUR BASE */}
+          <div style={{ flex: 1, minWidth: '300px' }}>
+            <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6, color: THEME.muted, marginBottom: 8, fontSize: '0.85rem', fontWeight: 600 }}>
+              <Database size={14} /> SÉLECTIONNER L'INSTANCE CIBLE
+            </label>
+            <select 
+              value={selectedBase} 
+              onChange={e => setSelectedBase(e.target.value)} 
+              style={{ 
+                height: 44, 
+                width: '100%', 
+                background: 'rgba(15, 23, 42, 0.6)', 
+                border: `1px solid ${THEME.border}`, 
+                borderRadius: '8px',
+                color: THEME.text,
+                padding: '0 16px',
+                cursor: 'pointer'
+              }}>
+              <option value="" disabled>-- Choisir une base --</option>
+              {bases.map(b => <option key={b.ID} value={b.ID}>{b.Instance} — {b.IP}</option>)}
+            </select>
+          </div>
+
+          {/* HISTORIQUE DES AUDITS */}
+          <div style={{ flex: 1, minWidth: '300px' }}>
+            <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6, color: THEME.muted, marginBottom: 8, fontSize: '0.85rem', fontWeight: 600 }}>
+              <Terminal size={14} /> HISTORIQUE DES AUDITS {loadingHistory && <span style={{fontSize: '0.7rem', color: THEME.accent}}>(Chargement...)</span>}
+            </label>
+            <select 
+              value={selectedAuditId} 
+              onChange={e => setSelectedAuditId(e.target.value)}
+              disabled={!selectedBase || auditHistory.length === 0}
+              style={{ 
+                height: 44, 
+                width: '100%', 
+                background: (!selectedBase || auditHistory.length === 0) ? 'rgba(15, 23, 42, 0.4)' : 'rgba(15, 23, 42, 0.6)', 
+                border: `1px solid ${THEME.border}`, 
+                borderRadius: '8px',
+                color: THEME.text,
+                padding: '0 16px',
+                cursor: (!selectedBase || auditHistory.length === 0) ? 'not-allowed' : 'pointer'
+              }}>
+              <option value="">
+                {auditHistory.length === 0 && selectedBase && !loadingHistory 
+                  ? "Aucun audit précédent" 
+                  : "-- Dernier audit en temps réel --"}
+              </option>
+              {auditHistory.map(audit => {
+                const dateObj = new Date(audit.date_audit);
+                return (
+                  <option key={audit.id} value={audit.id}>
+                    {dateObj.toLocaleString('fr-FR')}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+        </div>
+      </DarkCard>
 
       {/* Empty state */}
       {!selectedBase ? (

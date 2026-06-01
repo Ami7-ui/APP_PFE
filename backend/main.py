@@ -9,7 +9,6 @@ import zipfile
 import io
 import db_functions
 import ai_service
-import ollama
 import threading
 import time
 from chat_router import router as chat_router
