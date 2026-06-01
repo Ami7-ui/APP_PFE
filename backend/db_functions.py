@@ -2320,3 +2320,83 @@ def get_mysql_explain(id_base, sql_query):
             "tree": tree_sim
         }, None
 
+def get_dashboard_sessions_distribution(id_base):
+    conn, db_type, err = get_db_connection(id_base)
+    if err or not conn:
+        return {"total_sessions": 0, "data": []}, err
+    
+    try:
+        cursor = conn.cursor()
+        if db_type == "ORACLE":
+            sql = """
+                SELECT STATUS, COUNT(*) as nb
+                FROM V$SESSION
+                WHERE TYPE = 'USER'
+                GROUP BY STATUS
+            """
+            cursor.execute(sql)
+            rows = cursor.fetchall()
+            
+            total = sum(r[1] for r in rows)
+            data = []
+            
+            color_map = {'ACTIVE': '#3B82F6', 'INACTIVE': '#6B7280', 'KILLED': '#ef4444', 'SNIPED': '#f97316', 'CACHED': '#a78bfa'}
+            default_colors = ['#38bdf8','#a78bfa','#34d399','#fbbf24','#f87171','#f472b6','#2dd4bf','#60a5fa']
+
+            for i, r in enumerate(rows):
+                status = r[0] if r[0] else 'UNKNOWN'
+                count = r[1]
+                data.append({
+                    "name": status.upper(),
+                    "value": count,
+                    "color": color_map.get(status.upper(), default_colors[i % len(default_colors)])
+                })
+            
+            conn.close()
+            return {"total_sessions": total, "data": data}, None
+        
+        conn.close()
+        return {"total_sessions": 0, "data": []}, None
+    except Exception as e:
+        if conn: conn.close()
+        return {"total_sessions": 0, "data": []}, str(e)
+
+
+def get_dashboard_active_sessions_details(id_base):
+    conn, db_type, err = get_db_connection(id_base)
+    if err or not conn:
+        return [], err
+    try:
+        cursor = conn.cursor()
+        if db_type == "ORACLE":
+            sql = """
+                SELECT 
+                    SERIAL#, 
+                    USERNAME, 
+                    OSUSER, 
+                    MACHINE, 
+                    PROGRAM, 
+                    TO_CHAR(LOGON_TIME, 'YYYY-MM-DD HH24:MI:SS') as LOGON_TIME
+                FROM V$SESSION
+                WHERE STATUS = 'ACTIVE' AND TYPE = 'USER'
+            """
+            cursor.execute(sql)
+            rows = cursor.fetchall()
+            data = []
+            for r in rows:
+                data.append({
+                    "serial#": str(r[0]),
+                    "username": str(r[1] or '—'),
+                    "osuser": str(r[2] or '—'),
+                    "machine": str(r[3] or '—'),
+                    "program": str(r[4] or '—'),
+                    "logon_time": str(r[5] or '—')
+                })
+            conn.close()
+            return data, None
+        
+        conn.close()
+        return [], None
+    except Exception as e:
+        if conn: conn.close()
+        return [], str(e)

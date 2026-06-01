@@ -6,7 +6,9 @@ import { Activity, RefreshCw, PlugZap, Clock, Target, Settings, Loader2, Cpu, Ha
 import {
   DarkCard, THEME, COLORS,
   CpuMemLineChart, TxBarChart, LatencyAreaChart, HistogramChart,
-  ParetoChart, GaugeChart, DonutChart, HeatmapGrid, SgaPgaChart
+  ParetoChart, GaugeChart, DonutChart, HeatmapGrid, SgaPgaChart,
+  CheckEventChart, TablespaceSpaceChart, TopSegmentsChart,
+  DbTimeCpuRatioChart, SessionsDistributionDonut, ActiveSessionsTable, EspaceGlobalDonut
 } from '../components/DashboardCharts';
 
 // ── SAFE PARSE (Oracle CLOB) ─────────────────────────────────────────────────
@@ -89,6 +91,51 @@ function DynamicMetricCard({ scriptName, dataArray: rawData }) {
   const xKey = allKeys[0];
   const valKeys = allKeys.slice(1);
 
+  // ── Custom Event Check chart
+  if (n.includes('check event')) {
+    return (
+      <DarkCard title={scriptName} icon={<Timer size={16} />} span>
+        <CheckEventChart data={dataArray} />
+      </DarkCard>
+    );
+  }
+
+  // ── Custom Tablespace Free Space chart
+  if (n.includes('espace libre') && (n.includes('tablespace') || n.includes('table space'))) {
+    return (
+      <DarkCard title={scriptName} icon={<HardDrive size={16} />} span>
+        <TablespaceSpaceChart data={dataArray} />
+      </DarkCard>
+    );
+  }
+
+  // ── Custom Top Segments chart
+  if (n.includes('segment')) {
+    return (
+      <DarkCard title={scriptName} icon={<BarChart3 size={16} />} span>
+        <TopSegmentsChart data={dataArray} />
+      </DarkCard>
+    );
+  }
+
+  // ── Custom DB Time + CPU Ratio chart (grouped Bar Chart)
+  if (n.includes('db time') && n.includes('cpu ratio')) {
+    return (
+      <DarkCard title={scriptName} icon={<Cpu size={16} />} span>
+        <DbTimeCpuRatioChart data={dataArray} />
+      </DarkCard>
+    );
+  }
+
+  // ── Custom SGA / PGA Pie Chart (no labels, clean legend)
+  if (n.includes('sga') || n.includes('pga')) {
+    return (
+      <DarkCard title={scriptName} icon={<Database size={16} />}>
+        <SgaPgaChart data={dataArray} />
+      </DarkCard>
+    );
+  }
+
   // ── 1. CPU / Mémoire → LineChart fluide
   if (n.includes('cpu') || n.includes('mémoire') || n.includes('memory') || n.includes('charge globale') || n.includes('db time')) {
     return (
@@ -126,7 +173,7 @@ function DynamicMetricCard({ scriptName, dataArray: rawData }) {
   }
 
   // ── 5. Top SQL / Utilisateurs → Pareto
-  if (n.includes('top sql') || n.includes('top user') || n.includes('top utilisateur') || n.includes('fixed script') || n.includes('pareto')) {
+  if (n.includes('top sql') || n.includes('top user') || n.includes('top utilisateur') || n.includes('pareto')) {
     return (
       <DarkCard title={scriptName} icon={<Zap size={16} />} span>
         <ParetoChart data={dataArray} nameKey={xKey} valueKey={valKeys[0]} />
@@ -144,6 +191,15 @@ function DynamicMetricCard({ scriptName, dataArray: rawData }) {
     );
   }
 
+  // ── Espace Global → Donut Chart
+  if (n.includes('espace global')) {
+    return (
+      <DarkCard title={scriptName} icon={<HardDrive size={16} />}>
+        <EspaceGlobalDonut data={dataArray} />
+      </DarkCard>
+    );
+  }
+
   // ── 7. Disque → Donut
   if (n.includes('disque') || n.includes('disk') || n.includes('tablespace') || n.includes('storage') || n.includes('occupation')) {
     return (
@@ -153,7 +209,30 @@ function DynamicMetricCard({ scriptName, dataArray: rawData }) {
     );
   }
 
-  // ── 8. Connexions / Sessions → Heatmap
+  // ── Sessions Distribution → Donut Chart (agrégé par statut)
+  // Intercepté avant le guard générique "session"
+  if (
+    (n.includes('partition') || n.includes('statut')) &&
+    n.includes('session')
+  ) {
+    return (
+      <DarkCard title={scriptName} icon={<Users size={16} />}>
+        <SessionsDistributionDonut data={dataArray} />
+      </DarkCard>
+    );
+  }
+
+
+  // ── Détails des Sessions Actives → Tableau de données modern
+  if (n.includes('tails') && n.includes('session')) {
+    return (
+      <DarkCard title={scriptName} icon={<Users size={16} />} span>
+        <ActiveSessionsTable data={dataArray} />
+      </DarkCard>
+    );
+  }
+
+  // ── 8. Connexions / Sessions → Heatmap (fallback générique)
   if (n.includes('connexion') || n.includes('session') || n.includes('utilisateur') || n.includes('connection') || n.includes('actif')) {
     return (
       <DarkCard title={scriptName} icon={<Grid3X3 size={16} />} span>
@@ -241,8 +320,31 @@ export default function DashboardPage() {
     refetchInterval: 60000 // Refresh every minute
   });
 
+  const { data: sessionsDistribution } = useQuery({
+    queryKey: ['sessions_distribution', selectedBase],
+    queryFn: async () => {
+      if (!selectedBase) return null;
+      const res = await api.get(`/api/dashboard/sessions-distribution?id_base=${selectedBase}`);
+      return res.data;
+    },
+    enabled: !!selectedBase,
+    refetchInterval: 60000
+  });
+
+  const { data: activeSessionsDetails } = useQuery({
+    queryKey: ['active_sessions_details', selectedBase],
+    queryFn: async () => {
+      if (!selectedBase) return null;
+      const res = await api.get(`/api/dashboard/active-sessions-details?id_base=${selectedBase}`);
+      return res.data;
+    },
+    enabled: !!selectedBase,
+    refetchInterval: 60000
+  });
+
   // Pour le Dashboard, on considère qu'on a des métriques si l'API renvoie des données
   const hasData = auditResults && Object.keys(auditResults).length > 0;
+
 
   return (
     <div style={{ minHeight: '100vh' }}>
@@ -298,9 +400,31 @@ export default function DashboardPage() {
              </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 22 }}>
-              {auditResults && Object.entries(auditResults).map(([scriptName, dataArray]) => (
-                <DynamicMetricCard key={scriptName} scriptName={scriptName} dataArray={dataArray} />
-              ))}
+              {sessionsDistribution && (
+                <DarkCard title="RÉPARTITIONS DES STATUTS DE SESSIONS" icon={<Users size={16} />}>
+                  <SessionsDistributionDonut data={sessionsDistribution} />
+                </DarkCard>
+              )}
+              {activeSessionsDetails && activeSessionsDetails.length > 0 && (
+                <DarkCard title="DÉTAILS DES SESSIONS ACTIVES" icon={<Users size={16} />} span>
+                  <ActiveSessionsTable data={activeSessionsDetails} />
+                </DarkCard>
+              )}
+              {auditResults && Object.entries(auditResults).map(([scriptName, dataArray]) => {
+                const n = scriptName.toLowerCase();
+                // Ignorer les anciens scripts défectueux qui sont maintenant remplacés
+                if ((n.includes('partition') || n.includes('statut')) && n.includes('session')) return null;
+                if (n.includes('tails') && n.includes('session')) return null;
+                
+                // SUPPRESSION DES COMPOSANTS OBSOLÈTES
+                if (n.includes('partition') && (n.includes('type') || n.includes('segment'))) return null;
+                if (n.includes('cache hit ratio') || (n.includes('cache') && n.includes('ratio'))) return null;
+                if (n.includes('bloquante') || n.includes('blocking')) return null;
+                if (n.includes('fixed script')) return null;
+                if (n.includes('noeud') || n.includes('node') || n.includes('nœud')) return null;
+
+                return <DynamicMetricCard key={scriptName} scriptName={scriptName} dataArray={dataArray} />;
+              })}
             </div>
           )}
         </>

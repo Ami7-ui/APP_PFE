@@ -273,6 +273,18 @@ def get_metrics_history(id_base: int, time_range: str = Query("24h", alias="rang
 
 # ── ROUTES AUDIT & SQL ────────────────────────────────────────────────────────
 
+@app.get("/api/dashboard/sessions-distribution")
+def get_sessions_distribution(id_base: int):
+    data, err = db_functions.get_dashboard_sessions_distribution(id_base)
+    if err: raise HTTPException(status_code=400, detail=err)
+    return data
+
+@app.get("/api/dashboard/active-sessions-details")
+def get_active_sessions_details(id_base: int):
+    data, err = db_functions.get_dashboard_active_sessions_details(id_base)
+    if err: raise HTTPException(status_code=400, detail=err)
+    return data
+
 @app.get("/api/audit/{id_base}")
 def run_audit(id_base: int):
     ok, msg, data = db_functions.executer_audit_basique(id_base)
